@@ -1,0 +1,65 @@
+hub/
+├── main.py                # FastAPI 入口（API + Frontend）
+├── aggregator.py          # PC 聚合/转发逻辑（httpx）
+├── nodes.json             # 节点配置
+└── frontend/
+    └── app.html           # 纯前端（HTML / CSS / JS）
+
+
+pip install redis>=5.0 FastAPI uvicorn httpx
+
+powershell admin run
+wsl --install
+reboot 
+download docker
+https://www.docker.com/products/docker-desktop/
+install docker
+
+docker run -d ^
+  --name hub-redis ^
+  --restart unless-stopped ^
+  -p 6379:6379 ^
+  redis:latest
+``
+set sys env
+
+REDIS_URL
+redis://localhost:6379/0
+
+check:
+✅ netstat -ano | findstr 80
+✅ netstat -ano | findstr 8001
+✅ docker ps
+✅ http://172.16.122.71/app/
+✅ http://172.16.122.71/api/health/redis
+
+---
+
+GitHub upload + GitHub Pages
+
+1) Initialize git at workspace root:
+
+git init
+git add .
+git commit -m "init: hub backend and github pages frontend"
+
+2) Create GitHub repository (example: camera_lab_server), then bind remote and push:
+
+git branch -M main
+git remote add origin https://github.com/<your-account>/camera_lab_server.git
+git push -u origin main
+
+3) Enable GitHub Pages:
+
+- Repository Settings -> Pages
+- Build and deployment -> Source: Deploy from a branch
+- Branch: main, Folder: /docs
+
+4) Open page URL after deployment:
+
+https://<your-account>.github.io/camera_lab_server/
+
+5) Set backend API Base on the page:
+
+- The docs page supports custom API Base input (for example https://your-server-host)
+- If API Base is empty, it uses same-origin /api/*

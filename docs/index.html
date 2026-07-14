@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Hub Dashboard (Server Cache)</title>
+
+<style>
+body { font-family: Arial, sans-serif; margin:20px; color:#111827; }
+h2 { margin-bottom:12px; }
+h3 { margin:18px 0 8px; }
+
+.pc-row { margin-bottom:18px; }
+.pc-group { display:flex; gap:12px; flex-wrap:wrap; }
+
+.pc-card {
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  padding:8px;
+  min-width:190px;
+  background:#fff;
+}
+
+.pc-title { font-weight:700; margin-bottom:4px; font-size:14px; }
+.pc-sub { font-size:11px; color:#6b7280; margin-bottom:4px; }
+.pc-status { margin:4px 0; font-size:13px; }
+
+.status-never { color:#6b7280; }
+.status-running { color:#2563eb; }
+.status-ok { color:#065f46; }
+.status-warn { color:#9a3412; }
+.status-error { color:#991b1b; }
+
+.pc-actions { display:flex; gap:6px; margin-top:6px; }
+button {
+  padding:4px 8px;
+  border:1px solid #d1d5db;
+  border-radius:6px;
+  background:#fff;
+  cursor:pointer;
+  font-size:12px;
+}
+button:hover { background:#f9fafb; }
+button:disabled { opacity:.5; cursor:not-allowed; }
+
+#globalStatus { margin:14px 0; font-weight:700; color:#374151; }
+
+.api-config {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+  margin:8px 0 12px;
+}
+.api-config input {
+  min-width:320px;
+  padding:6px 8px;
+  border:1px solid #d1d5db;
+  border-radius:6px;
+}
+
+/* summary */
+.summary {
+  display:grid;
+  grid-template-columns:repeat(4,minmax(160px,1fr));
+  gap:12px;
+  margin:12px 0 14px;
+}
+.card {
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  padding:10px;
+}
+.card .k { font-size:12px; color:#6b7280; }
+.card .v { font-size:14px; font-weight:700; margin-top:6px; }
+
+/* accordion */
+details {
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  margin-bottom:10px;
+  overflow:hidden;
+}
+summary {
+  cursor:pointer;
+  padding:10px 12px;
+  background:#f8fafc;
+  font-weight:700;
+  display:flex;
+  justify-content:space-between;
+}
+summary::-webkit-details-marker { display:none; }
+
+.badge {
+  font-size:12px;
+  padding:2px 8px;
+  border-radius:999px;
+  border:1px solid #d1d5db;
+}
+.badge.ok { background:#ecfdf5; color:#065f46; }
+.badge.warn { background:#fff7ed; color:#9a3412; }
+
+/* table */
+.tbl { width:100%; border-collapse:collapse; }
+.tbl th, .tbl td { border-top:1px solid #eee; padding:8px 10px; font-size:13px; }
+.mono { font-family: monospace; }
+.good { color:#065f46; font-weight:700; }
+.danger { color:#991b1b; font-weight:700; }
+</style>
+</head>
+
+<body>
+<h2>Hub Dashboard</h2>
+
+<div class="api-config">
+  <label for="apiBaseInput">API Base:</label>
+  <input id="apiBaseInput" placeholder="https://your-backend-host" />
+  <button id="saveApiBaseBtn" type="button">保存</button>
+</div>
+
+<div id="pc-container"></div>
+<div id="globalStatus">Ready.</div>
+<div id="result" style="margin-top:20px;"></div>
+
+<script>
+/* =======================
+   Server-synced caches
+   ======================= */
+
+// in-memory view model from server
+const serverMeta = {}; // { nodeId: meta }
+const nodeList = [];   // from /api/nodes
+const queryBase = new URLSearchParams(location.search).get("apiBase") || "";
+const storedBase = localStorage.getItem("hub_api_base") || "";
+let apiBase = (queryBase || storedBase).trim().replace(/\/$/, "");
+
+function setGlobal(msg){ document.getElementById("globalStatus").innerText = msg; }
+
+function apiUrl(path){
+  if (!apiBase) return path;
+  return apiBase + path;
+}
+
+function classify(n){
+  const s=(n.name+n.id).toUpperCase();
+  if(s.includes("GC")) return "GC";
+  if(s.includes("DC")) return "DC";
+  if(s.includes("S688")) return "S688";
+  return "Others";
+}
+function esc(s){
+  return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
+}
+
+function fmtSec(sec){
+  if(sec == null) return "";
+  const s = Math.max(0, Math.round(sec));
+  if(s < 60) return s + "s";
+  return Math.floor(s/60) + "m " + (s%60) + "s";
+}
+
+/* =======================
+   Card status rendering (from server meta)
+   ======================= */
+function renderStatusLine(nodeId){
+  const meta = serverMeta[nodeId];
+  if(!meta){
+    return `<div class="pc-status status-never">⚪ Never run</div>`;
+  }
+
+  const level = meta.health?.level || "ok";
+  const dur = fmtSec(meta.duration_sec);
+
+  if(level === "ok")   return `<div class="pc-status status-ok">✅ OK · ${dur}</div>`;
+  if(level === "warn") return `<div class="pc-status status-warn">⚠️ WARN · ${dur}</div>`;
+  return `<div class="pc-status status-error">❌ Error · ${dur}</div>`;
+}
+
+function updateCard(nodeId){
+  const el = document.getElementById("status-"+nodeId);
+  if(el) el.innerHTML = renderStatusLine(nodeId);
+}
+
+/* =======================
+   Load nodes + render cards
+   ======================= */
+async function loadNodes(){
+  const r = await fetch(apiUrl("/api/nodes"));
+  if(!r.ok){
+    setGlobal("Failed /api/nodes: HTTP "+r.status+" (请检查 API Base)");
+    return [];
+  }
+  const data = await r.json();
+  return data.nodes || [];
+}
+
+function renderCards(nodes){
+  const groups={GC:[],DC:[],S688:[],Others:[]};
+  nodes.forEach(n=>groups[classify(n)].push(n));
+
+  const c=document.getElementById("pc-container");
+  c.innerHTML="";
+
+  Object.entries(groups).forEach(([g,list])=>{
+    if(!list.length) return;
+    const row=document.createElement("div");
+    row.className="pc-row";
+    row.innerHTML=`<h3>${g}</h3>`;
+    const wrap=document.createElement("div");
+    wrap.className="pc-group";
+
+    list.forEach(n=>{
+      const card=document.createElement("div");
+      card.className="pc-card";
+      card.innerHTML=`
+        <div class="pc-title">${esc(n.name)}</div>
+        <div class="pc-sub">${esc(n.id)}</div>
+        <div id="status-${esc(n.id)}">${renderStatusLine(n.id)}</div>
+        <div class="pc-actions">
+          <button onclick="viewResult('${esc(n.id)}')">查看</button>
+          <button onclick="refreshPC('${esc(n.id)}')">刷新</button>
+        </div>
+      `;
+      wrap.appendChild(card);
+    });
+
+    row.appendChild(wrap);
+    c.appendChild(row);
+  });
+}
+
+/* =======================
+   Sync all cached meta from server (Redis)
+   ======================= */
+async function syncAllCached(){
+  const r = await fetch(apiUrl("/api/cache/latest"));
+  if(!r.ok) return;
+  const payload = await r.json();
+  const items = payload.items || {};
+  Object.entries(items).forEach(([nodeId, obj])=>{
+    if(obj && obj.meta) serverMeta[nodeId] = obj.meta;
+  });
+  // refresh cards
+  nodeList.forEach(n => updateCard(n.id));
+}
+
+/* =======================
+   View / Refresh (server-side)
+   ======================= */
+async function viewResult(nodeId){
+  setGlobal("Loading cached result of "+nodeId+" ...");
+  const r = await fetch(apiUrl(`/api/node/${encodeURIComponent(nodeId)}/cached`));
+  if(!r.ok){
+    setGlobal("No cached data on server for "+nodeId+" (HTTP "+r.status+")");
+    return;
+  }
+  const payload = await r.json();
+  if(payload.meta) serverMeta[nodeId] = payload.meta;
+  updateCard(nodeId);
+
+  renderResult(payload.data, nodeId);
+  setGlobal("Showing cached result of "+nodeId);
+}
+
+async function refreshPC(nodeId){
+  setGlobal("Refreshing "+nodeId+" ...");
+  // optional: optimistic UI
+  const st = document.getElementById("status-"+nodeId);
+  if(st) st.innerHTML = `<div class="pc-status status-running">⏳ Running ...</div>`;
+
+  const r = await fetch(apiUrl(`/api/node/${encodeURIComponent(nodeId)}/refresh`), { method:"POST" });
+  if(!r.ok){
+    setGlobal("Refresh failed "+nodeId+" (HTTP "+r.status+")");
+    // try restore card status from last meta
+    updateCard(nodeId);
+    return;
+  }
+  const payload = await r.json();
+  if(payload.meta) serverMeta[nodeId] = payload.meta;
+  updateCard(nodeId);
+
+  // after refresh, show latest cached data immediately
+  await viewResult(nodeId);
+}
+
+/* =======================
+   Render result summary/tables (same as your current table UI)
+   ======================= */
+function section(title, content, count=0, warn=false){
+  return `<details open>
+    <summary>${esc(title)} <span class="badge ${warn?"warn":"ok"}">${warn?"WARN":"OK"} · ${count}</span></summary>
+    ${content}
+  </details>`;
+}
+
+function renderResult(d, nodeId){
+  const box=document.getElementById("result");
+  const drivers=d.drivers||[];
+  const services=d.services||[];
+  const bios=d.bios||{};
+  const mep=d.mep||{};
+  const sync=d.sync_time||{};
+  const power=d.power||{};
+
+  const anyRunning = services.some(s=>String(s.status).toLowerCase()==="running");
+  const biosBad = Object.values(bios).some(v=>String(v).toLowerCase()!=="aligned");
+  const powerBad = (power.screen_sleep_ac && String(power.screen_sleep_ac).toLowerCase()!=="never")
+                || (power.hibernate_ac && String(power.hibernate_ac).toLowerCase()!=="never");
+
+  box.innerHTML=`
+    <h3>Result · ${esc(nodeId)}</h3>
+    <div class="summary">
+      <div class="card"><div class="k">OS</div><div class="v">${esc(d.os?.version||"-")}</div></div>
+      <div class="card"><div class="k">Board</div><div class="v">${esc(d.os?.board||"-")}</div></div>
+      <div class="card"><div class="k">Power</div><div class="v">${esc(power.mode||"-")}</div></div>
+      <div class="card"><div class="k">Drivers</div><div class="v">${drivers.length}</div></div>
+    </div>
+
+    ${section("Drivers", renderDrivers(drivers), drivers.length, false)}
+    ${section("MEP", renderKV(mep,false), Object.keys(mep).length, false)}
+    ${section("Sync Time", renderKV(sync,false), Object.keys(sync).length, false)}
+    ${section("Power", renderKV(power,false), Object.keys(power).length, powerBad)}
+    ${section("System Services", renderServices(services), services.length, anyRunning)}
+    ${section("BIOS", renderKV(bios,true), Object.keys(bios).length, biosBad)}
+  `;
+}
+
+function renderKV(obj, highlight=false){
+  const entries = Object.entries(obj||{});
+  if(!entries.length) return `<div style="padding:10px;color:#6b7280;">(empty)</div>`;
+  return `<table class="tbl">${
+    entries.map(([k,v])=>{
+      const cls = highlight ? (String(v).toLowerCase()==="aligned"?"good":"danger") : "mono";
+      return `<tr><td class="mono"><b>${esc(k)}</b></td><td class="${cls}">${esc(v)}</td></tr>`;
+    }).join("")
+  }</table>`;
+}
+
+function renderDrivers(list){
+  if(!list.length) return `<div style="padding:10px;color:#6b7280;">(empty)</div>`;
+  return `<table class="tbl">
+    <tr><th>Name</th><th>Version</th><th>Provider</th></tr>${
+      list.map(d=>`<tr><td class="mono">${esc(d.name)}</td><td>${esc(d.version)}</td><td>${esc(d.provider)}</td></tr>`).join("")
+    }</table>`;
+}
+
+function renderServices(list){
+  if(!list.length) return `<div style="padding:10px;color:#6b7280;">(empty)</div>`;
+  // Stopped normal / Running abnormal (red) [2](https://intel.sharepoint.com/sites/vtg_ss_val_win/_layouts/15/Doc.aspx?sourcedoc=%7B64B006C4-CFE8-4D84-8E37-6F8A6E5E08BA%7D&file=RVP%20Check%20Point.xlsx&action=default&mobileredirect=true&DefaultItemOpen=1)
+  return `<table class="tbl">
+    <tr><th>Status</th><th>Name</th><th>Display Name</th></tr>${
+      list.map(s=>{
+        const bad = String(s.status).toLowerCase()==="running";
+        return `<tr>
+          <td class="${bad?"danger":"good"}">${esc(s.status)}</td>
+          <td class="mono">${esc(s.name)}</td>
+          <td>${esc(s.display_name)}</td>
+        </tr>`;
+      }).join("")
+    }</table>`;
+}
+
+/* =======================
+   Init
+   ======================= */
+(async function bootstrap(){
+  const input = document.getElementById("apiBaseInput");
+  const saveBtn = document.getElementById("saveApiBaseBtn");
+  input.value = apiBase;
+  saveBtn.addEventListener("click", () => {
+    apiBase = (input.value || "").trim().replace(/\/$/, "");
+    localStorage.setItem("hub_api_base", apiBase);
+    location.reload();
+  });
+
+  setGlobal("Loading nodes... API Base=" + (apiBase || "same-origin"));
+  const nodes = await loadNodes();
+  nodeList.splice(0, nodeList.length, ...nodes); // keep reference
+  renderCards(nodes);
+  setGlobal("Syncing server cache...");
+  await syncAllCached();
+  setGlobal("Ready.");
+})();
+</script>
+
+</body>
+</html>
