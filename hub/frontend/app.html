@@ -182,26 +182,30 @@
         .detail-header {
             background: #34495e;
             color: white;
-            padding: 0.8rem 1rem;
+            padding: 0.6rem 1rem;
             border-bottom: 1px solid #ddd;
             flex-shrink: 0;
             display: flex;
             flex-wrap: nowrap;
             align-items: center;
-            gap: 2rem;
+            gap: 1rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .detail-header h2 {
-            font-size: 1.1rem;
+            font-size: 1rem;
             margin: 0;
             flex-shrink: 0;
             white-space: nowrap;
+            display: inline;
         }
 
         .node-info-row {
-            display: flex;
-            gap: 0.5rem;
-            font-size: 0.8rem;
+            display: inline-flex;
+            gap: 0.3rem;
+            font-size: 0.75rem;
             margin: 0;
             align-items: center;
             flex-shrink: 0;
@@ -211,11 +215,13 @@
         .info-label {
             font-weight: bold;
             color: #bdc3c7;
-            min-width: auto;
+            font-size: 0.7rem;
+            margin: 0;
         }
 
         .info-value {
             color: #ecf0f1;
+            font-size: 0.7rem;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
