@@ -817,45 +817,6 @@
             }
 
             return html;
-            }
-
-            const services = data.services || [];
-            if (services.length > 0) {
-                html += `
-                    <div class="section">
-                        <div class="section-title">Services (${services.length})</div>
-                        <table class="table">
-                            <thead><tr><th>Status</th><th>Name</th><th>Display Name</th></tr></thead>
-                            <tbody>
-                                ${services.map(s => {
-                                    const bad = String(s.status).toLowerCase() === "running";
-                                    return `<tr><td><span class="badge badge-${bad ? "error" : "ok"}">${esc(s.status)}</span></td><td class="table-mono">${esc(s.name)}</td><td>${esc(s.display_name)}</td></tr>`;
-                                }).join("")}
-                            </tbody>
-                        </table>
-                    </div>
-                `;
-            }
-
-            const bios = data.bios || {};
-            if (Object.keys(bios).length > 0) {
-                html += `
-                    <div class="section">
-                        <div class="section-title">BIOS</div>
-                        <table class="table">
-                            <thead><tr><th>Key</th><th>Value</th></tr></thead>
-                            <tbody>
-                                ${Object.entries(bios).map(([k, v]) => {
-                                    const aligned = String(v).toLowerCase() === "aligned";
-                                    return `<tr><td class="table-mono">${esc(k)}</td><td><span class="badge badge-${aligned ? "ok" : "error"}">${esc(v)}</span></td></tr>`;
-                                }).join("")}
-                            </tbody>
-                        </table>
-                    </div>
-                `;
-            }
-
-            return html;
         }
 
         function renderDetailError(nodeId, err) {
