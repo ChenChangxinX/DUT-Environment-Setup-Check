@@ -105,7 +105,11 @@ def list_nodes():
         raise HTTPException(status_code=500, detail=str(e))
     return {
         "nodes": [
-            {"id": node_id, "name": info.get("name", node_id)}
+            {
+                "id": node_id,
+                "name": info.get("name", node_id),
+                "device_name": info.get("device_name", ""),
+            }
             for node_id, info in nodes.items()
         ]
     }

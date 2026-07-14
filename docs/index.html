@@ -141,10 +141,12 @@ function apiUrl(path){
 }
 
 function classify(n){
-  const s=(n.name+n.id).toUpperCase();
-  if(s.includes("GC")) return "GC";
-  if(s.includes("DC")) return "DC";
-  if(s.includes("S688")) return "S688";
+  // 从 device_name 末段提取分组，如 "NVL-Hx-001-GC" -> "GC"
+  const dn = (n.device_name || "").trim();
+  if(dn){
+    const seg = dn.split("-").pop().toUpperCase();
+    return seg || "Others";
+  }
   return "Others";
 }
 function esc(s){
@@ -194,8 +196,12 @@ async function loadNodes(){
 }
 
 function renderCards(nodes){
-  const groups={GC:[],DC:[],S688:[],Others:[]};
-  nodes.forEach(n=>groups[classify(n)].push(n));
+  // 动态分组，保持 device_name 中出现的顺序
+  const groups={};
+  nodes.forEach(n=>{
+    const g=classify(n);
+    (groups[g]=groups[g]||[]).push(n);
+  });
 
   const c=document.getElementById("pc-container");
   c.innerHTML="";
