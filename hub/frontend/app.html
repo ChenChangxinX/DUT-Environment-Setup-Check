@@ -175,6 +175,7 @@
             display: flex;
             flex-direction: column;
             height: 100%;
+            overflow: hidden;
         }
 
         .detail-header {
@@ -182,6 +183,7 @@
             color: white;
             padding: 1rem;
             border-bottom: 1px solid #ddd;
+            flex-shrink: 0;
         }
 
         .detail-header h2 {
@@ -213,6 +215,7 @@
             border-bottom: 1px solid #ddd;
             display: flex;
             gap: 0.5rem;
+            flex-shrink: 0;
         }
 
         .btn {
@@ -250,8 +253,10 @@
 
         .detail-content {
             flex: 1;
-            overflow-y: auto;
+            overflow-y: scroll;
+            overflow-x: hidden;
             padding: 1rem;
+            min-height: 0;
         }
 
         .section {
