@@ -160,6 +160,7 @@
             flex-direction: column;
             background: white;
             overflow: hidden;
+            min-height: 0;
         }
 
         .content-empty {
@@ -257,6 +258,24 @@
             overflow-x: hidden;
             padding: 1rem;
             min-height: 0;
+        }
+
+        /* Ensure scrollbar is always visible */
+        .detail-content::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        .detail-content::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .detail-content::-webkit-scrollbar-thumb {
+            background: #bdc3c7;
+            border-radius: 5px;
+        }
+
+        .detail-content::-webkit-scrollbar-thumb:hover {
+            background: #95a5a6;
         }
 
         .section {
@@ -381,6 +400,13 @@
             100% { transform: rotate(360deg); }
         }
 
+        #detailPanel {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            height: 100%;
+        }
+
         @media (max-width: 768px) {
             .container {
                 flex-direction: column;
@@ -424,7 +450,7 @@
             <div class="content-empty" id="emptyState">
                 <div>Set API Base URL and select a node from the left panel to view details</div>
             </div>
-            <div id="detailPanel" style="display: none;">
+            <div id="detailPanel" style="display: none; flex-direction: column;">
                 <!-- Populated by JavaScript -->
             </div>
         </main>
@@ -590,7 +616,7 @@
             const content = document.getElementById("detailPanel");
             if (!content.style || content.style.display === "none") {
                 document.getElementById("emptyState").style.display = "none";
-                content.style.display = "block";
+                content.style.display = "flex";
             }
 
             const meta = detail.meta || {};
@@ -725,7 +751,7 @@
             const content = document.getElementById("detailPanel");
             if (!content.style || content.style.display === "none") {
                 document.getElementById("emptyState").style.display = "none";
-                content.style.display = "block";
+                content.style.display = "flex";
             }
             const node = nodeList.find(n => n.id === nodeId);
             content.innerHTML = `
