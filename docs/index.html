@@ -211,13 +211,58 @@
         }
 
         .detail-actions {
-            padding: 1rem;
+            padding: 0.75rem 1rem;
             background: #ecf0f1;
             border-bottom: 1px solid #ddd;
             display: flex;
             gap: 0.5rem;
             flex-shrink: 0;
+            flex-wrap: wrap;
+            align-items: center;
         }
+
+        .btn-warning {
+            background: #e67e22;
+            color: white;
+        }
+        .btn-warning:hover { background: #ca6f1e; }
+        .btn-warning:disabled { background: #95a5a6; cursor: not-allowed; }
+
+        .setup-form {
+            background: #f8f9fa;
+            border-bottom: 1px solid #ddd;
+            padding: 1rem;
+            flex-shrink: 0;
+        }
+        .setup-form h4 { margin: 0 0 0.75rem; font-size: 0.95rem; color: #2c3e50; }
+        .setup-form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem 1rem;
+            margin-bottom: 0.75rem;
+        }
+        .setup-form-grid .full { grid-column: 1 / -1; }
+        .setup-form label { font-size: 0.8rem; font-weight: 600; color: #7f8c8d; display: block; margin-bottom: 2px; }
+        .setup-form input {
+            width: 100%; padding: 0.4rem 0.6rem; border: 1px solid #bdc3c7;
+            border-radius: 4px; font-size: 0.85rem; box-sizing: border-box;
+        }
+        .setup-log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.8rem;
+            padding: 0.75rem;
+            max-height: 200px;
+            overflow-y: auto;
+            flex-shrink: 0;
+            border-bottom: 1px solid #333;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .setup-log .log-ok { color: #4ec9b0; }
+        .setup-log .log-err { color: #f48771; }
+        .setup-log .log-done { color: #b5cea8; font-weight: bold; }
 
         .btn {
             padding: 0.6rem 1.2rem;
@@ -667,7 +712,11 @@
 
                 <div class="detail-actions">
                     <button class="btn btn-primary" onclick="doRefresh('${esc(nodeId)}')">${isLoading ? "⏳ Loading..." : "🔄 Refresh"}</button>
+                    <button class="btn btn-warning" onclick="showSetupForm('${esc(nodeId)}', 'validation')">📦 ValidationExecutionConfig</button>
+                    <button class="btn btn-warning" onclick="showSetupForm('${esc(nodeId)}', 'auto')">⚙ AutoCaseEnvInstall</button>
                 </div>
+                <div id="setupFormArea" style="display:none;"></div>
+                <div id="setupLogArea" style="display:none;"></div>
 
                 <div class="detail-content">
                     ${renderDetailContent(config, data, meta, isLoading)}
@@ -841,6 +890,114 @@
                     <div style="color: #e74c3c; padding: 1rem;">Error: ${esc(err)}</div>
                 </div>
             `;
+        }
+
+        // ==================== Setup (SSH) ====================
+        let _setupPollTimer = null;
+
+        function showSetupForm(nodeId, type) {
+            const formArea = document.getElementById("setupFormArea");
+            const logArea = document.getElementById("setupLogArea");
+            if (!formArea) return;
+            if (_setupPollTimer) { clearInterval(_setupPollTimer); _setupPollTimer = null; }
+            logArea.style.display = "none";
+            logArea.innerHTML = "";
+            const label = type === "validation" ? "ValidationExecutionConfig" : "AutoCaseEnvInstall";
+            formArea.style.display = "block";
+            formArea.innerHTML = `
+                <div class="setup-form">
+                    <h4>🔐 SSH Setup — ${label}</h4>
+                    <div class="setup-form-grid">
+                        <div>
+                            <label>SSH 用户名 *</label>
+                            <input id="setup-username" placeholder="e.g. Administrator">
+                        </div>
+                        <div>
+                            <label>SSH 密码</label>
+                            <input id="setup-password" type="password" placeholder="留空表示无密码">
+                        </div>
+                        <div class="full">
+                            <label>源文件路径 (本地绝对路径 或 UNC 路径)</label>
+                            <input id="setup-source" placeholder="e.g. C:\\workspace\\ValidationExecutionConfig.zip">
+                        </div>
+                        <div class="full">
+                            <label>远端工作目录</label>
+                            <input id="setup-workspace" value="C:\\AutoPackageSetup">
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:0.5rem;">
+                        <button class="btn btn-warning" onclick="runSetup('${esc(nodeId)}', '${type}')">▶ 开始执行</button>
+                        <button class="btn" style="background:#ecf0f1" onclick="document.getElementById('setupFormArea').style.display='none'">✕ 取消</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function runSetup(nodeId, type) {
+            const username = (document.getElementById("setup-username")?.value || "").trim();
+            const password = document.getElementById("setup-password")?.value || "";
+            const sourceVal = (document.getElementById("setup-source")?.value || "").trim();
+            const workspaceDir = (document.getElementById("setup-workspace")?.value || "").trim() || "C:\\AutoPackageSetup";
+
+            if (!username) { alert("请填写 SSH 用户名"); return; }
+
+            const body = { type, username, password, workspace_dir: workspaceDir };
+            if (sourceVal) {
+                if (type === "validation") body.validation_share = sourceVal;
+                else body.auto_share = sourceVal;
+            }
+
+            const formArea = document.getElementById("setupFormArea");
+            const logArea = document.getElementById("setupLogArea");
+            formArea.style.display = "none";
+            logArea.style.display = "block";
+            logArea.className = "setup-log";
+            logArea.innerHTML = `<span class="log-ok">[INFO] Connecting to ${nodeId}...</span>\n`;
+
+            try {
+                const r = await fetch(apiUrl(`/api/node/${encodeURIComponent(nodeId)}/setup`), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                });
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({ detail: "Unknown error" }));
+                    logArea.innerHTML += `<span class="log-err">[ERROR] ${esc(err.detail || String(r.status))}</span>\n`;
+                    return;
+                }
+                const { job_id } = await r.json();
+                logArea.innerHTML += `<span class="log-ok">[INFO] Job started: ${job_id}</span>\n`;
+                _pollSetupJob(job_id, logArea);
+            } catch (e) {
+                logArea.innerHTML += `<span class="log-err">[ERROR] ${esc(e.message)}</span>\n`;
+            }
+        }
+
+        function _pollSetupJob(jobId, logArea) {
+            let shownLines = 0;
+            if (_setupPollTimer) clearInterval(_setupPollTimer);
+            _setupPollTimer = setInterval(async () => {
+                try {
+                    const r = await fetch(apiUrl(`/api/setup/job/${encodeURIComponent(jobId)}`));
+                    if (!r.ok) return;
+                    const payload = await r.json();
+                    const logs = payload.logs || [];
+                    for (let i = shownLines; i < logs.length; i++) {
+                        const line = logs[i];
+                        const cls = line.includes("[DONE]") ? "log-done" : line.includes("stderr") || line.includes("失败") || line.includes("ERROR") ? "log-err" : "log-ok";
+                        logArea.innerHTML += `<span class="${cls}">${esc(line)}</span>\n`;
+                        logArea.scrollTop = logArea.scrollHeight;
+                    }
+                    shownLines = logs.length;
+                    if (payload.status === "finished" || payload.status === "failed") {
+                        clearInterval(_setupPollTimer);
+                        _setupPollTimer = null;
+                        const statusCls = payload.status === "finished" ? "log-done" : "log-err";
+                        logArea.innerHTML += `<span class="${statusCls}">[${payload.status.toUpperCase()}] ${esc(payload.message || payload.board_status)}</span>\n`;
+                        logArea.scrollTop = logArea.scrollHeight;
+                    }
+                } catch (e) { /* ignore poll errors */ }
+            }, 1500);
         }
 
         // ==================== Actions ====================

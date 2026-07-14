@@ -1,6 +1,9 @@
 import asyncio
 import json
 import os
+import secrets
+import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -274,3 +277,89 @@ async def clear_cached(node_id: str):
 @app.get("/api/health")
 async def health():
     return {"ok": True, "cache_entries": len(_cache)}
+
+
+# ----------------------------
+# SSH Setup Jobs (reuse windows_env_setup_web logic)
+# ----------------------------
+sys.path.insert(0, str(BASE_DIR))
+try:
+    from windows_env_setup_web import JOB_STORE as _SSH_JOB_STORE, run_remote_setup as _run_remote_setup
+    _SSH_AVAILABLE = True
+except ImportError:
+    _SSH_AVAILABLE = False
+
+
+@app.post("/api/node/{node_id}/setup")
+async def run_node_setup(node_id: str, request: Request):
+    """SSH into node and run ValidationExecutionConfig or AutoCaseEnvInstall"""
+    if not _SSH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="SSH setup unavailable: install paramiko")
+
+    try:
+        nodes = load_nodes()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if node_id not in nodes:
+        raise HTTPException(status_code=404, detail=f"Unknown node: {node_id}")
+
+    body = await request.json()
+    setup_type = body.get("type", "both")  # "validation", "auto", or "both"
+    username = (body.get("username") or "").strip()
+    password = body.get("password", "")
+
+    if not username:
+        raise HTTPException(status_code=400, detail="SSH username is required")
+
+    node_info = nodes[node_id]
+    host = node_info["name"]  # name field is the IP address
+
+    board_view = {
+        "id": node_id,
+        "name": node_info.get("device_name", node_id),
+        "host": host,
+    }
+    job_id = _SSH_JOB_STORE.create([board_view], {"type": setup_type})
+
+    board_config = {
+        "id": node_id,
+        "name": board_view["name"],
+        "host": host,
+        "port": int(body.get("port", 22)),
+        "username": username,
+        "password": password,
+        "workspace_dir": body.get("workspace_dir") or r"C:\AutoPackageSetup",
+        "validation_share": body.get("validation_share") or r"C:\workspace\ValidationExecutionConfig.zip",
+        "auto_share": body.get("auto_share") or r"C:\workspace\AutoCaseEnvInstall.bat",
+        "share_username": body.get("share_username", ""),
+        "share_password": body.get("share_password", ""),
+        "run_validation": setup_type in ("validation", "both"),
+        "run_auto": setup_type in ("auto", "both"),
+    }
+
+    def _run():
+        _run_remote_setup(board_config, job_id)
+        _SSH_JOB_STORE.finish(job_id)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"ok": True, "job_id": job_id}
+
+
+@app.get("/api/setup/job/{job_id}")
+async def get_setup_job(job_id: str):
+    """Poll setup job status and logs"""
+    if not _SSH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="SSH setup unavailable")
+    job = _SSH_JOB_STORE.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    board = list(job["boards"].values())[0] if job["boards"] else {}
+    return {
+        "ok": True,
+        "status": job["status"],
+        "board_status": board.get("status", "unknown"),
+        "message": board.get("message", ""),
+        "logs": board.get("logs", []),
+    }
