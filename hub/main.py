@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from redis.asyncio import Redis
@@ -21,6 +22,17 @@ NODES_PATH = Path(__file__).with_name("nodes.json")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "86400"))  # 24h
 LOCK_TTL_SECONDS = int(os.getenv("LOCK_TTL_SECONDS", "900"))      # 15min
+CORS_ALLOW_ORIGINS = [
+    origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",") if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ALLOW_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Hub -> PC call timeout (long tasks)
 PC_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=60.0, pool=None)
