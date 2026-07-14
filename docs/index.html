@@ -603,24 +603,29 @@
             });
 
             try {
-                // Try to get cached data first
-                let detail = await getNodeDetail(nodeId);
-                renderDetailPanel(nodeId, detail);
+                // Get node config from nodeList (always available)
+                const node = nodeList.find(n => n.id === nodeId);
+                
+                // Show config panel immediately with loading state
+                renderDetailPanel(nodeId, { config: node }, true);
                 setGlobal("Ready.");
-            } catch (e) {
-                // If no cached data, auto-refresh
+
+                // Try to load system data asynchronously (optional)
                 try {
-                    const detail = await refreshNode(nodeId);
-                    renderDetailPanel(nodeId, detail);
-                    setGlobal("Ready.");
-                } catch (refreshErr) {
-                    setGlobal(`Error: ${refreshErr.message}`);
-                    renderDetailError(nodeId, refreshErr.message);
+                    let detail = await getNodeDetail(nodeId);
+                    if (!detail.config) detail.config = node;
+                    renderDetailPanel(nodeId, detail, false);
+                } catch (e) {
+                    // Fail silently - config is already displayed
+                    console.log(`Could not load system data for ${nodeId}: ${e.message}`);
                 }
+            } catch (e) {
+                setGlobal(`Error: ${e.message}`);
+                renderDetailError(nodeId, e.message);
             }
         }
 
-        function renderDetailPanel(nodeId, detail) {
+        function renderDetailPanel(nodeId, detail, isLoading) {
             const content = document.getElementById("detailPanel");
             if (!content.style || content.style.display === "none") {
                 document.getElementById("emptyState").style.display = "none";
@@ -637,9 +642,12 @@
             if (health.level === "ok") healthBadge = "ok";
             else if (health.level === "error") healthBadge = "error";
 
+            // Show "(loading)" indicator if system data is still being fetched
+            const loadingIndicator = isLoading ? " <span style='font-size: 0.8em; color: #7f8c8d;'>(loading...)</span>" : "";
+
             content.innerHTML = `
                 <div class="detail-header">
-                    <h2>${esc(nodeId)}</h2>
+                    <h2>${esc(nodeId)}${loadingIndicator}</h2>
                     <div class="node-info-row">
                         <span class="info-label">IP:</span>
                         <span class="info-value">${esc(config?.name || node?.name || "-")}</span>
@@ -651,23 +659,23 @@
                     <div class="node-info-row">
                         <span class="info-label">Status:</span>
                         <span class="info-value">
-                            <span class="badge badge-${healthBadge}">${health.level || "UNKNOWN"}</span>
-                            · ${fmtSec(meta.duration_sec)} ago
+                            <span class="badge badge-${healthBadge}">${health.level || (Object.keys(data).length === 0 ? "UNKNOWN" : health.level)}</span>
+                            ${meta.duration_sec ? `· ${fmtSec(meta.duration_sec)} ago` : ""}
                         </span>
                     </div>
                 </div>
 
                 <div class="detail-actions">
-                    <button class="btn btn-primary" onclick="doRefresh('${esc(nodeId)}')">🔄 Refresh</button>
+                    <button class="btn btn-primary" onclick="doRefresh('${esc(nodeId)}')">${isLoading ? "⏳ Loading..." : "🔄 Refresh"}</button>
                 </div>
 
                 <div class="detail-content">
-                    ${renderDetailContent(config, data, meta)}
+                    ${renderDetailContent(config, data, meta, isLoading)}
                 </div>
             `;
         }
 
-        function renderDetailContent(config, data, meta) {
+        function renderDetailContent(config, data, meta, isLoading) {
             const health = meta.health || {};
             const reasons = health.reasons || [];
 
@@ -705,25 +713,46 @@
                 </div>
             `;
 
-            html += `
-                <div class="section">
-                    <div class="section-title">System Info</div>
-                    <div class="status-card">
-                        <div class="status-item ok">
-                            <div class="status-label">OS</div>
-                            <div class="status-value">${esc(data.os?.version || "-")}</div>
-                        </div>
-                        <div class="status-item ok">
-                            <div class="status-label">Board</div>
-                            <div class="status-value">${esc(data.os?.board || "-")}</div>
-                        </div>
-                        <div class="status-item ok">
-                            <div class="status-label">Power Mode</div>
-                            <div class="status-value">${esc(data.power?.mode || "-")}</div>
+            // Only show system info section if data is available
+            if (Object.keys(data).length > 0) {
+                html += `
+                    <div class="section">
+                        <div class="section-title">System Info</div>
+                        <div class="status-card">
+                            <div class="status-item ok">
+                                <div class="status-label">OS</div>
+                                <div class="status-value">${esc(data.os?.version || "-")}</div>
+                            </div>
+                            <div class="status-item ok">
+                                <div class="status-label">Board</div>
+                                <div class="status-value">${esc(data.os?.board || "-")}</div>
+                            </div>
+                            <div class="status-item ok">
+                                <div class="status-label">Power Mode</div>
+                                <div class="status-value">${esc(data.power?.mode || "-")}</div>
+                            </div>
                         </div>
                     </div>
-                </div>
-            `;
+                `;
+            } else if (isLoading) {
+                html += `
+                    <div class="section">
+                        <div class="section-title">System Info</div>
+                        <div style="padding: 1rem; text-align: center; color: #7f8c8d;">
+                            <span>Loading system information...</span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div class="section">
+                        <div class="section-title">System Info</div>
+                        <div style="padding: 1rem; color: #e74c3c;">
+                            <span>⚠ System information not available</span>
+                        </div>
+                    </div>
+                `;
+            }
 
             if (reasons.length > 0) {
                 html += `
@@ -749,6 +778,45 @@
                         </table>
                     </div>
                 `;
+            }
+
+            const services = data.services || [];
+            if (services.length > 0) {
+                html += `
+                    <div class="section">
+                        <div class="section-title">Services (${services.length})</div>
+                        <table class="table">
+                            <thead><tr><th>Status</th><th>Name</th><th>Display Name</th></tr></thead>
+                            <tbody>
+                                ${services.map(s => {
+                                    const bad = String(s.status).toLowerCase() === "running";
+                                    return `<tr><td><span class="badge badge-${bad ? "error" : "ok"}">${esc(s.status)}</span></td><td class="table-mono">${esc(s.name)}</td><td>${esc(s.display_name)}</td></tr>`;
+                                }).join("")}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+
+            const bios = data.bios || {};
+            if (Object.keys(bios).length > 0) {
+                html += `
+                    <div class="section">
+                        <div class="section-title">BIOS</div>
+                        <table class="table">
+                            <thead><tr><th>Key</th><th>Value</th></tr></thead>
+                            <tbody>
+                                ${Object.entries(bios).map(([k, v]) => {
+                                    const aligned = String(v).toLowerCase() === "aligned";
+                                    return `<tr><td class="table-mono">${esc(k)}</td><td><span class="badge badge-${aligned ? "ok" : "error"}">${esc(v)}</span></td></tr>`;
+                                }).join("")}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+
+            return html;
             }
 
             const services = data.services || [];
