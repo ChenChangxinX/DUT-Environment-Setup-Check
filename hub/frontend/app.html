@@ -182,32 +182,43 @@
         .detail-header {
             background: #34495e;
             color: white;
-            padding: 1rem;
+            padding: 0.8rem 1rem;
             border-bottom: 1px solid #ddd;
             flex-shrink: 0;
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: center;
+            gap: 2rem;
         }
 
         .detail-header h2 {
-            font-size: 1.3rem;
-            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+            margin: 0;
+            flex-shrink: 0;
+            white-space: nowrap;
         }
 
         .node-info-row {
             display: flex;
-            gap: 1rem;
-            font-size: 0.9rem;
-            margin: 0.25rem 0;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            margin: 0;
+            align-items: center;
+            flex-shrink: 0;
+            white-space: nowrap;
         }
 
         .info-label {
             font-weight: bold;
             color: #bdc3c7;
-            min-width: 80px;
+            min-width: auto;
         }
 
         .info-value {
             color: #ecf0f1;
-            word-break: break-all;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .detail-actions {
