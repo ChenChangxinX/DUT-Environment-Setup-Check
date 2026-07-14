@@ -109,6 +109,7 @@ def list_nodes():
                 "id": node_id,
                 "name": info.get("name", node_id),
                 "device_name": info.get("device_name", ""),
+                **info  # Include all config fields from nodes.json
             }
             for node_id, info in nodes.items()
         ]
@@ -218,10 +219,26 @@ async def refresh_node(node_id: str, request: Request):
 # ----------------------------
 @app.get("/api/node/{node_id}/cached")
 async def get_cached(node_id: str):
+    try:
+        nodes = load_nodes()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    if node_id not in nodes:
+        raise HTTPException(status_code=404, detail=f"Unknown node: {node_id}")
+    
     entry = cache_get(node_id)
     if not entry:
         return JSONResponse(status_code=404, content={"ok": False, "detail": "No cached data"})
-    return {"ok": True, "node": node_id, "meta": entry["meta"], "data": entry["data"]}
+    
+    # Include full node config from nodes.json
+    return {
+        "ok": True,
+        "node": node_id,
+        "config": nodes[node_id],  # Full config from nodes.json
+        "meta": entry["meta"],
+        "data": entry["data"]
+    }
 
 # ----------------------------
 # (Compatibility) Your existing endpoint: /api/node/{node_id}/items/1

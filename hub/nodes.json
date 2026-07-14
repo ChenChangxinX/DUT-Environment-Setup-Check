@@ -1,15 +1,137 @@
 {
-  "GC-1": { "name": "PC-17", "base_url": "http://172.16.112.17:8000" },
-  "GC-2": { "name": "PC-51", "base_url": "http://172.16.121.51:8000" },
-  "DC-1": { "name": "PC-55", "base_url": "http://172.16.121.55:8000" },
-  "GC-3": { "name": "PC-56", "base_url": "http://172.16.121.56:8000" },
-  "GC-4": { "name": "PC-58", "base_url": "http://172.16.121.58:8000" },
-  "DC-2": { "name": "PC-64", "base_url": "http://172.16.121.64:8000" },
-  "DC-3": { "name": "PC-69", "base_url": "http://172.16.121.69:8000" },
-  "DC-4": { "name": "PC-73", "base_url": "http://172.16.121.73:8000" },
-  "GC-5": { "name": "PC-75", "base_url": "http://172.16.121.75:8000" },
-  "S688": { "name": "PC-82", "base_url": "http://172.16.121.82:8000" },
-  "GC-6": { "name": "PC-85", "base_url": "http://172.16.121.85:8000" },
-  "GC-7": { "name": "PC-106", "base_url": "http://172.16.121.106:8000" },
-  "DC-5": { "name": "PC-115", "base_url": "http://172.16.121.115:8000" }
+  "RVP1-1": {
+    "name": "172.16.121.75",
+    "base_url": "http://172.16.121.75:8000",
+    "silicon": "B0",
+    "qdf": "L2K1",
+    "camera": "New CPHY-DPHY G3 Card with OV13B, OG0VA1B, OV08X40",
+    "device_name": "NVL-Hx-001-GC",
+    "rework_rvp": "rework auto CSE privacy (wait auto dryrun)"
+  },
+  "RVP1-2": {
+    "name": "172.16.121.106",
+    "base_url": "http://172.16.121.106:8000",
+    "silicon": "B0",
+    "qdf": "L2K1",
+    "camera": "New CPHY-DPHY G3 Card with OV13B, OG0VA1B, OV08X40",
+    "device_name": "NVL-Hx-002-GC",
+    "allocation": "Stability"
+  },
+  "RVP4-1": {
+    "name": "172.16.121.115",
+    "base_url": "http://172.16.121.115:8000",
+    "silicon": "B0",
+    "qdf": "L2K1",
+    "camera": "New CPHY-DPHY G1 OV13B (WF) + New CPHY-DPHY G1 imx688 (UF)",
+    "device_name": "NVL-Hx-003-DC2",
+    "allocation": "Stability"
+  },
+  "RVP4-2": {
+    "name": "172.16.121.73",
+    "base_url": "http://172.16.121.73:8000",
+    "silicon": "B0",
+    "qdf": "L2K1",
+    "camera": "New CPHY-DPHY G1 OV13B (WF) + New CPHY-DPHY G1 imx688 (UF)",
+    "device_name": "NVL-Hx-004-DC2"
+  },
+  "RVP1-3": {
+    "name": "172.16.121.58",
+    "base_url": "http://172.16.121.58:8000",
+    "silicon": "B0",
+    "qdf": "L2K1",
+    "camera": "New CPHY-DPHY G3 Card with OV13B, OG0VA1B, OV08X40",
+    "device_name": "NVL-Hx-005-GC",
+    "rework_rvp": "ok (CSE Privacy mode)",
+    "allocation": "HLK"
+  },
+  "RVP1-4": {
+    "name": "172.16.121.56",
+    "base_url": "http://172.16.121.56:8000",
+    "silicon": "B0",
+    "qdf": "L2L9",
+    "camera": "New CPHY-DPHY G3 Card with OV13B, OG0VA1B, OV08X40",
+    "device_name": "NVL-Hx-006-GC",
+    "allocation": "Stability"
+  },
+  "RVP1-5": {
+    "name": "172.16.121.97",
+    "base_url": "http://172.16.121.97:8000",
+    "silicon": "B0",
+    "qdf": "L2L9",
+    "camera": "New CPHY-DPHY G3 Card with OV13B, OG0VA1B, OV08X40",
+    "device_name": "NVL-Hx-007-GC",
+    "allocation": "Stability"
+  },
+  "RVP4-3": {
+    "name": "172.16.121.64",
+    "base_url": "http://172.16.121.64:8000",
+    "silicon": "B0",
+    "qdf": "L2K1",
+    "camera": "New CPHY-DPHY G1 OV13B (WF) + New CPHY-DPHY G1 imx688 (UF)",
+    "device_name": "NVL-Hx-008-DC2",
+    "rework_rvp": "ok (CSE Privacy mode)",
+    "allocation": "HLK"
+  },
+  "RVP4-4": {
+    "name": "172.16.121.69",
+    "base_url": "http://172.16.121.69:8000",
+    "silicon": "B0",
+    "qdf": "L2K1",
+    "camera": "New CPHY-DPHY G1 OV13B (WF) + New CPHY-DPHY G1 imx688 (UF)",
+    "device_name": "NVL-Hx-009-DC2",
+    "rework_rvp": "ok (VCIP rework)",
+    "allocation": "Nightly"
+  },
+  "RVP4-5": {
+    "name": "172.16.121.82",
+    "base_url": "http://172.16.121.82:8000",
+    "silicon": "B0",
+    "qdf": "L2L9",
+    "camera": "New CPHY-DPHY G1 imx688 (WF)",
+    "device_name": "NVL-Hx-010-S688",
+    "allocation": "Stability"
+  },
+  "RVP4-6": {
+    "name": "172.16.121.55",
+    "base_url": "http://172.16.121.55:8000",
+    "silicon": "B0",
+    "qdf": "L2L9",
+    "camera": "New CPHY-DPHY G1 OV13B (WF) + New CPHY-DPHY G1 imx688 (UF)",
+    "device_name": "NVL-Hx-011-DC2",
+    "allocation": "HLK"
+  },
+  "RVP3-1": {
+    "name": "172.16.121.85",
+    "base_url": "http://172.16.121.85:8000",
+    "silicon": "B0",
+    "qdf": "L2K1",
+    "camera": "legacy G3 with OV13B, OG0VA1B, OV08X40",
+    "device_name": "NVL-Hx-012-GC",
+    "allocation": "HLK"
+  },
+  "RVP3-2": {
+    "name": "172.16.121.94",
+    "base_url": "http://172.16.121.94:8000",
+    "silicon": "B0",
+    "qdf": "L2K1",
+    "camera": "legacy D1 with OV13B",
+    "device_name": "NVL-Hx-013-GC"
+  },
+  "RVP5-1": {
+    "name": "172.16.121.78",
+    "base_url": "http://172.16.121.78:8000",
+    "silicon": "A0",
+    "qdf": "QAHJ",
+    "camera": "legacy G3 with OV13B, OG0VA1B, OV08X40",
+    "device_name": "NVL-Hx-014-GC",
+    "allocation": "Nightly"
+  },
+  "RVP5-2": {
+    "name": "172.16.121.98",
+    "base_url": "http://172.16.121.98:8000",
+    "silicon": "A0",
+    "qdf": "QAHH",
+    "camera": "legacy G3 with OV13B, OG0VA1B, OV08X40",
+    "device_name": "NVL-Hx-015-GC"
+  }
 }
