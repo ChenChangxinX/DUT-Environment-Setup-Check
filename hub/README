@@ -1,37 +1,19 @@
 hub/
-├── main.py                # FastAPI 入口（API + Frontend）
+├── main.py                # FastAPI 入口（API + 内存缓存）
 ├── aggregator.py          # PC 聚合/转发逻辑（httpx）
 ├── nodes.json             # 节点配置
+├── cache.json             # 自动生成：持久化缓存（重启不丢数据）
 └── frontend/
     └── app.html           # 纯前端（HTML / CSS / JS）
 
 
-pip install redis>=5.0 FastAPI uvicorn httpx
+pip install fastapi uvicorn httpx
 
-powershell admin run
-wsl --install
-reboot 
-download docker
-https://www.docker.com/products/docker-desktop/
-install docker
+启动:
+uvicorn main:app --host 0.0.0.0 --port 8001
 
-docker run -d ^
-  --name hub-redis ^
-  --restart unless-stopped ^
-  -p 6379:6379 ^
-  redis:latest
-``
-set sys env
-
-REDIS_URL
-redis://localhost:6379/0
-
-check:
-✅ netstat -ano | findstr 80
-✅ netstat -ano | findstr 8001
-✅ docker ps
-✅ http://172.16.122.71/app/
-✅ http://172.16.122.71/api/health/redis
+健康检查:
+✅ http://localhost:8001/api/health
 
 ---
 
