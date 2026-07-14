@@ -861,11 +861,11 @@
                     <div class="section">
                         <div class="section-title">Services (${services.length})</div>
                         <table class="table">
-                            <thead><tr><th>Status</th><th>Name</th><th>Display Name</th></tr></thead>
+                            <thead><tr><th>Name</th><th>Display Name</th><th>Status</th></tr></thead>
                             <tbody>
                                 ${services.map(s => {
                                     const bad = String(s.status).toLowerCase() === "running";
-                                    return `<tr><td><span class="badge badge-${bad ? "error" : "ok"}">${esc(s.status)}</span></td><td class="table-mono">${esc(s.name)}</td><td>${esc(s.display_name)}</td></tr>`;
+                                    return `<tr><td class="table-mono">${esc(s.name)}</td><td>${esc(s.display_name)}</td><td><span class="badge badge-${bad ? "error" : "ok"}">${esc(s.status)}</span></td></tr>`;
                                 }).join("")}
                             </tbody>
                         </table>
