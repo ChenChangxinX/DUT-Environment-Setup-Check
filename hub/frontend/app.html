@@ -592,12 +592,20 @@
             });
 
             try {
-                const detail = await getNodeDetail(nodeId);
+                // Try to get cached data first
+                let detail = await getNodeDetail(nodeId);
                 renderDetailPanel(nodeId, detail);
                 setGlobal("Ready.");
             } catch (e) {
-                setGlobal(`Error: ${e.message}`);
-                renderDetailError(nodeId, e.message);
+                // If no cached data, auto-refresh
+                try {
+                    const detail = await refreshNode(nodeId);
+                    renderDetailPanel(nodeId, detail);
+                    setGlobal("Ready.");
+                } catch (refreshErr) {
+                    setGlobal(`Error: ${refreshErr.message}`);
+                    renderDetailError(nodeId, refreshErr.message);
+                }
             }
         }
 
