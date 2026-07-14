@@ -338,17 +338,19 @@
 
         .status-card {
             display: flex;
-            gap: 2rem;
+            gap: 1rem;
             margin-bottom: 1rem;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
+            align-items: center;
         }
 
         .status-item {
-            flex: 0 1 calc(33% - 1rem);
+            flex: 1 1 auto;
             background: #ecf0f1;
-            padding: 1rem;
+            padding: 0.6rem 0.8rem;
             border-radius: 4px;
             border-left: 4px solid #95a5a6;
+            min-width: 0;
         }
 
         .status-item.ok {
@@ -367,16 +369,17 @@
         }
 
         .status-label {
-            font-size: 0.9rem;
+            font-size: 0.75rem;
             color: #7f8c8d;
             text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.2rem;
         }
 
         .status-value {
-            font-size: 1.5rem;
+            font-size: 1rem;
             font-weight: bold;
             color: #2c3e50;
-            margin-top: 0.5rem;
         }
 
         .table {
