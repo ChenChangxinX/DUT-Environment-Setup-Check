@@ -617,41 +617,62 @@
 
         // ==================== UI Rendering ====================
         function renderSidebar(nodes) {
-            const groups = {};
-            nodes.forEach(n => {
-                const g = classify(n);
-                if (!groups[g]) groups[g] = [];
-                groups[g].push(n);
-            });
-
             const sidebar = document.getElementById("sidebar");
             sidebar.innerHTML = "";
 
-            Object.entries(groups).forEach(([group, groupNodes]) => {
-                const groupEl = document.createElement("div");
-                groupEl.className = "sidebar-group";
-                groupEl.innerHTML = `<div class="group-title" data-group="${esc(group)}">${esc(group)} (${groupNodes.length})</div>`;
+            // DUT Info section
+            const dutInfoGroup = document.createElement("div");
+            dutInfoGroup.className = "sidebar-group";
+            dutInfoGroup.innerHTML = `<div class="group-title">📊 DUT Info (${nodes.length})</div>`;
 
-                const itemsEl = document.createElement("div");
-                itemsEl.className = "group-items";
-                groupNodes.forEach(n => {
-                    const item = document.createElement("div");
-                    item.className = "node-item";
-                    item.dataset.nodeId = n.id;
-                    item.innerHTML = `<span class="node-id">${esc(n.id)}</span><span class="node-name">${esc(n.name)}</span>`;
-                    item.addEventListener("click", () => selectNode(n.id));
-                    itemsEl.appendChild(item);
-                });
-                groupEl.appendChild(itemsEl);
-
-                const title = groupEl.querySelector(".group-title");
-                title.addEventListener("click", () => {
-                    itemsEl.classList.toggle("collapsed");
-                    title.classList.toggle("collapsed");
-                });
-
-                sidebar.appendChild(groupEl);
+            const dutInfoItems = document.createElement("div");
+            dutInfoItems.className = "group-items";
+            nodes.forEach(n => {
+                const item = document.createElement("div");
+                item.className = "node-item";
+                item.dataset.nodeId = n.id;
+                item.innerHTML = `<span class="node-id">${esc(n.id)}</span><span class="node-name">${esc(n.name)}</span>`;
+                item.addEventListener("click", () => selectNode(n.id));
+                dutInfoItems.appendChild(item);
             });
+            dutInfoGroup.appendChild(dutInfoItems);
+
+            // Collapse/Expand
+            const dutTitle = dutInfoGroup.querySelector(".group-title");
+            dutTitle.addEventListener("click", () => {
+                dutInfoItems.classList.toggle("collapsed");
+                dutTitle.classList.toggle("collapsed");
+            });
+
+            sidebar.appendChild(dutInfoGroup);
+
+            // Trigger section
+            const triggerGroup = document.createElement("div");
+            triggerGroup.className = "sidebar-group";
+            triggerGroup.innerHTML = `<div class="group-title">⚡ Trigger (2)</div>`;
+
+            const triggerItems = document.createElement("div");
+            triggerItems.className = "group-items";
+            
+            ["manual", "auto"].forEach(type => {
+                const item = document.createElement("div");
+                item.className = "node-item";
+                item.dataset.triggerType = type;
+                item.innerHTML = `<span class="node-id">${type}</span>`;
+                item.addEventListener("click", () => selectTrigger(type));
+                triggerItems.appendChild(item);
+            });
+            
+            triggerGroup.appendChild(triggerItems);
+
+            // Collapse/Expand
+            const triggerTitle = triggerGroup.querySelector(".group-title");
+            triggerTitle.addEventListener("click", () => {
+                triggerItems.classList.toggle("collapsed");
+                triggerTitle.classList.toggle("collapsed");
+            });
+
+            sidebar.appendChild(triggerGroup);
         }
 
         async function selectNode(nodeId) {
@@ -683,6 +704,39 @@
                 setGlobal(`Error: ${e.message}`);
                 renderDetailError(nodeId, e.message);
             }
+        }
+
+        function selectTrigger(triggerType) {
+            setGlobal(`Trigger: ${triggerType}`);
+
+            document.querySelectorAll(".node-item").forEach(el => {
+                el.classList.toggle("active", el.dataset.triggerType === triggerType);
+            });
+
+            renderTriggerPanel(triggerType);
+        }
+
+        function renderTriggerPanel(triggerType) {
+            const content = document.getElementById("detailPanel");
+            content.innerHTML = `
+                <div class="detail-header">
+                    <h2>⚡ Trigger: ${esc(triggerType)}</h2>
+                </div>
+                <div class="detail-actions">
+                    <button class="btn btn-primary" onclick="refreshTriggerPage('${esc(triggerType)}')" style="margin-bottom: 1rem;">🔄 刷新</button>
+                </div>
+                <div class="detail-content" id="triggerContent">
+                    <div style="padding: 1rem; color: #7f8c8d;">
+                        ${triggerType === 'manual' ? 'Manual Trigger 页面' : 'Auto Trigger 页面'}
+                    </div>
+                </div>
+            `;
+        }
+
+        function refreshTriggerPage(triggerType) {
+            setGlobal(`Refreshing ${triggerType} trigger page...`);
+            renderTriggerPanel(triggerType);
+            setGlobal("Ready.");
         }
 
         function renderDetailPanel(nodeId, detail, isLoading) {
