@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="Hub Aggregator")
@@ -370,5 +370,15 @@ async def get_setup_job(job_id: str):
 # Serve static files (frontend)
 # ----------------------------
 FRONTEND_DIR = BASE_DIR / "frontend"
+INDEX_HTML = FRONTEND_DIR / "app.html"
+
+@app.get("/")
+async def serve_frontend():
+    """Serve the frontend index.html"""
+    if INDEX_HTML.exists():
+        return FileResponse(INDEX_HTML, media_type="text/html")
+    return {"detail": "Frontend not found"}
+
+# Mount remaining static files
 if FRONTEND_DIR.exists():
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
