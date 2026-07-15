@@ -718,6 +718,20 @@
 
         function renderTriggerPanel(triggerType) {
             const content = document.getElementById("detailPanel");
+            
+            // Ensure detailPanel is visible
+            if (document.getElementById("emptyState")) {
+                document.getElementById("emptyState").style.display = "none";
+            }
+            if (content) {
+                content.style.display = "flex";
+            }
+            
+            if (!content) {
+                console.error("detailPanel not found");
+                return;
+            }
+            
             content.innerHTML = `
                 <div class="detail-header">
                     <h2>⚡ Trigger: ${esc(triggerType)}</h2>
