@@ -12,6 +12,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="Hub Aggregator")
 
@@ -363,3 +364,11 @@ async def get_setup_job(job_id: str):
         "message": board.get("message", ""),
         "logs": board.get("logs", []),
     }
+
+
+# ----------------------------
+# Serve static files (frontend)
+# ----------------------------
+FRONTEND_DIR = BASE_DIR / "frontend"
+if FRONTEND_DIR.exists():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
