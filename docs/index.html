@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hub Dashboard - GitHub Pages</title>
+    <title>Hub Dashboard</title>
     <style>
         * {
             margin: 0;
@@ -500,10 +500,10 @@
     <!-- Header -->
     <div class="header">
         <div>
-            <h1>🔍 Hub Dashboard (Remote)</h1>
+            <h1>🔍 Hub Dashboard</h1>
         </div>
         <div class="api-config">
-            <input type="text" id="apiBaseInput" placeholder="API Base URL (required, e.g., http://server:8001)">
+            <input type="text" id="apiBaseInput" placeholder="API Base URL (e.g., http://localhost:8001)">
             <button id="saveApiBaseBtn">Save</button>
             <div class="status-line" id="globalStatus">Initializing...</div>
         </div>
@@ -519,7 +519,7 @@
         <!-- Right Content Area -->
         <main class="content">
             <div class="content-empty" id="emptyState">
-                <div>Set API Base URL and select a node from the left panel to view details</div>
+                <div>Select a node from the left panel to view details</div>
             </div>
             <div id="detailPanel" style="display: none; flex-direction: column;">
                 <!-- Populated by JavaScript -->
@@ -586,9 +586,7 @@
 
         // ==================== API Calls ====================
         async function loadNodes() {
-            const url = apiUrl("/api/nodes");
-            if (!url) return [];
-            const r = await fetch(url);
+            const r = await fetch(apiUrl("/api/nodes"));
             if (!r.ok) {
                 setGlobal("Failed /api/nodes: HTTP " + r.status);
                 return [];
@@ -598,9 +596,7 @@
         }
 
         async function syncAllCached() {
-            const url = apiUrl("/api/cache/latest");
-            if (!url) return;
-            const r = await fetch(url);
+            const r = await fetch(apiUrl("/api/cache/latest"));
             if (!r.ok) return;
             const payload = await r.json();
             const items = payload.items || {};
@@ -610,9 +606,7 @@
         }
 
         async function getNodeDetail(nodeId) {
-            const url = apiUrl(`/api/node/${encodeURIComponent(nodeId)}/cached`);
-            if (!url) throw new Error("API Base URL not set");
-            const r = await fetch(url);
+            const r = await fetch(apiUrl(`/api/node/${encodeURIComponent(nodeId)}/cached`));
             if (!r.ok) {
                 throw new Error(`HTTP ${r.status}`);
             }
@@ -622,9 +616,7 @@
         }
 
         async function refreshNode(nodeId) {
-            const url = apiUrl(`/api/node/${encodeURIComponent(nodeId)}/refresh`);
-            if (!url) throw new Error("API Base URL not set");
-            const r = await fetch(url, { method: "POST" });
+            const r = await fetch(apiUrl(`/api/node/${encodeURIComponent(nodeId)}/refresh`), { method: "POST" });
             if (!r.ok) {
                 throw new Error(`HTTP ${r.status}`);
             }
@@ -692,7 +684,6 @@
 
             sidebar.appendChild(triggerGroup);
         }
-        }
 
         async function selectNode(nodeId) {
             selectedNodeId = nodeId;
@@ -750,7 +741,7 @@
                 console.error("detailPanel not found");
                 return;
             }
-
+            
             content.innerHTML = `
                 <div class="detail-header">
                     <h2>⚡ Trigger: ${esc(triggerType)}</h2>
@@ -1148,10 +1139,6 @@
 
             setGlobal("Loading nodes... API Base=" + (apiBase || "auto (localhost:8001)"));
             nodeList = await loadNodes();
-            if (nodeList.length === 0) {
-                setGlobal("No nodes loaded");
-                return;
-            }
             renderSidebar(nodeList);
 
             setGlobal("Syncing server cache...");
