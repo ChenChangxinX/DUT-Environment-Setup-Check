@@ -529,9 +529,13 @@
 
     <script>
         // ==================== Configuration ====================
+        // Auto-detect localhost for local development
+        const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        const defaultApiBase = isLocalhost ? `http://${location.hostname}:8001` : "";
+        
         const queryBase = new URLSearchParams(location.search).get("apiBase") || "";
         const storedBase = localStorage.getItem("hub_api_base") || "";
-        let apiBase = (queryBase || storedBase).trim().replace(/\/$/, "");
+        let apiBase = (queryBase || storedBase || defaultApiBase).trim().replace(/\/$/, "");
 
         const serverMeta = {};
         let nodeList = [];
@@ -544,8 +548,11 @@
 
         function apiUrl(path) {
             if (!apiBase) {
-                setGlobal("ERROR: API Base URL not set");
-                return "";
+                // If no API base and not on localhost, show warning
+                if (!isLocalhost) {
+                    return null;  // Will be handled by fetch with error
+                }
+                return path;
             }
             return apiBase + path;
         }
@@ -1115,20 +1122,31 @@
             input.value = apiBase;
             saveBtn.addEventListener("click", () => {
                 apiBase = (input.value || "").trim().replace(/\/$/, "");
-                if (!apiBase) {
-                    setGlobal("ERROR: API Base URL required");
-                    return;
-                }
                 localStorage.setItem("hub_api_base", apiBase);
                 location.reload();
             });
 
-            if (!apiBase) {
-                setGlobal("Please set API Base URL");
+            // Check if we need API configuration (GitHub Pages without backend URL)
+            if (!apiBase && !isLocalhost) {
+                const emptyState = document.getElementById("emptyState");
+                emptyState.innerHTML = `
+                    <div style="text-align: center; padding: 2rem;">
+                        <p style="font-size: 1rem; margin-bottom: 1rem;">⚙️ Configuration Required</p>
+                        <p style="font-size: 0.9rem; color: #666; margin-bottom: 1.5rem;">
+                            This is running on GitHub Pages (static hosting).<br>
+                            To use the dashboard, please enter your backend API URL above.
+                        </p>
+                        <p style="font-size: 0.85rem; color: #999;">
+                            Example: <code>https://your-backend-url:8001</code><br>
+                            or <code>http://localhost:8001</code> for local development
+                        </p>
+                    </div>
+                `;
+                setGlobal("Ready. Please configure API Base URL.");
                 return;
             }
 
-            setGlobal("Loading nodes...");
+            setGlobal("Loading nodes... API Base=" + (apiBase || "auto (localhost:8001)"));
             nodeList = await loadNodes();
             if (nodeList.length === 0) {
                 setGlobal("No nodes loaded");
