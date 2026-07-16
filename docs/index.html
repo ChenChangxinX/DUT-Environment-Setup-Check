@@ -637,17 +637,57 @@
 
             const dutInfoItems = document.createElement("div");
             dutInfoItems.className = "group-items";
+
+            // Group nodes by classification
+            const grouped = {};
             nodes.forEach(n => {
-                const item = document.createElement("div");
-                item.className = "node-item";
-                item.dataset.nodeId = n.id;
-                item.innerHTML = `<span class="node-id">${esc(n.id)}</span><span class="node-name">${esc(n.name)}</span>`;
-                item.addEventListener("click", () => selectNode(n.id));
-                dutInfoItems.appendChild(item);
+                const cat = classify(n);
+                if (!grouped[cat]) grouped[cat] = [];
+                grouped[cat].push(n);
             });
+
+            // Create category sections
+            Object.keys(grouped).sort().forEach(cat => {
+                const catGroup = document.createElement("div");
+                catGroup.style.marginBottom = "0.75rem";
+
+                const catTitle = document.createElement("div");
+                catTitle.className = "group-title";
+                catTitle.style.fontSize = "0.9rem";
+                catTitle.style.marginBottom = "0.25rem";
+                catTitle.style.paddingLeft = "1rem";
+                catTitle.textContent = `${cat} (${grouped[cat].length})`;
+                catTitle.style.cursor = "pointer";
+                catGroup.appendChild(catTitle);
+
+                const catItems = document.createElement("div");
+                catItems.className = "group-items";
+                catItems.style.marginLeft = "1rem";
+
+                grouped[cat].forEach(n => {
+                    const item = document.createElement("div");
+                    item.className = "node-item";
+                    item.dataset.nodeId = n.id;
+                    item.innerHTML = `<span class="node-id">${esc(n.id)}</span><span class="node-name">${esc(n.name)}</span>`;
+                    item.addEventListener("click", () => selectNode(n.id));
+                    catItems.appendChild(item);
+                });
+
+                catGroup.appendChild(catItems);
+
+                // Collapse/Expand for category
+                catTitle.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    catItems.classList.toggle("collapsed");
+                    catTitle.classList.toggle("collapsed");
+                });
+
+                dutInfoItems.appendChild(catGroup);
+            });
+
             dutInfoGroup.appendChild(dutInfoItems);
 
-            // Collapse/Expand
+            // Collapse/Expand for DUT Info
             const dutTitle = dutInfoGroup.querySelector(".group-title");
             dutTitle.addEventListener("click", () => {
                 dutInfoItems.classList.toggle("collapsed");
