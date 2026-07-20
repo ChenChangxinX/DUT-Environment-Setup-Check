@@ -668,7 +668,8 @@
                     const item = document.createElement("div");
                     item.className = "node-item";
                     item.dataset.nodeId = n.id;
-                    item.innerHTML = `<span class="node-id">${esc(n.id)}</span><span class="node-name">${esc(n.name)}</span>`;
+                    const rvpType = n.rvp_type ? ` | ${esc(n.rvp_type)}` : "";
+                    item.innerHTML = `<span class="node-id">${esc(n.id)}</span><span class="node-name">${esc(n.name)}${rvpType}</span>`;
                     item.addEventListener("click", () => selectNode(n.id));
                     catItems.appendChild(item);
                 });
@@ -835,6 +836,10 @@
                         <span class="info-value">${esc(config?.device_name || node?.device_name || "-")}</span>
                     </div>
                     <div class="node-info-row">
+                        <span class="info-label">RVP:</span>
+                        <span class="info-value">${esc(config?.rvp_type || node?.rvp_type || "-")}</span>
+                    </div>
+                    <div class="node-info-row">
                         <span class="info-label">Status:</span>
                         <span class="info-value">
                             <span class="badge badge-${healthBadge}">${health.level || (Object.keys(data).length === 0 ? "UNKNOWN" : health.level)}</span>
@@ -872,6 +877,7 @@
             const configFields = [
                 {key: "silicon", label: "Silicon"},
                 {key: "qdf", label: "QDF"},
+                {key: "rvp_type", label: "RVP Type"},
                 {key: "camera", label: "Camera"},
                 {key: "base_url", label: "Base URL"},
                 {key: "allocation", label: "Allocation"},
@@ -1177,18 +1183,33 @@
                 return;
             }
 
-            setGlobal("Loading nodes... API Base=" + (apiBase || "auto (localhost:8001)"));
-            nodeList = await loadNodes();
-            renderSidebar(nodeList);
+            try {
+                setGlobal("Loading nodes... API Base=" + (apiBase || "auto (localhost:8001)"));
+                nodeList = await loadNodes();
+                renderSidebar(nodeList);
 
-            setGlobal("Syncing server cache...");
-            await syncAllCached();
+                setGlobal("Syncing server cache...");
+                await syncAllCached();
 
-            if (nodeList.length > 0) {
-                await selectNode(nodeList[0].id);
+                if (nodeList.length > 0) {
+                    await selectNode(nodeList[0].id);
+                }
+
+                setGlobal("Ready.");
+            } catch (e) {
+                const msg = "Backend unreachable: " + (e?.message || e);
+                setGlobal(msg);
+                const emptyState = document.getElementById("emptyState");
+                emptyState.innerHTML = `
+                    <div style="text-align: center; padding: 2rem; color: #c0392b;">
+                        <p style="font-size: 1rem; margin-bottom: 0.75rem;">Cannot connect to backend API</p>
+                        <p style="font-size: 0.9rem; color: #666;">${esc(msg)}</p>
+                        <p style="font-size: 0.85rem; color: #999; margin-top: 0.75rem;">
+                            Please start backend service on port 8001, or configure API Base URL.
+                        </p>
+                    </div>
+                `;
             }
-
-            setGlobal("Ready.");
         })();
     </script>
 </body>
