@@ -639,6 +639,7 @@
 
         <!-- Right Content Area -->
         <main class="content">
+            <div id="jiraGlobalPanel"></div>
             <div class="content-empty" id="emptyState">
                 <div>Select a node from the left panel to view details</div>
             </div>
@@ -671,7 +672,13 @@
             testChart: [],
             testScene: [],
         };
-        const dutJiraFilters = {};
+        const globalJiraFilters = {
+            specificDut: "__ANY__",
+            lightEquipment: "__ANY__",
+            testChart: "__ANY__",
+            testScene: "__ANY__",
+        };
+        let jiraSyncInProgress = false;
         const jiraSyncConfig = {
             base: "https://jira.devtools.intel.com",
             projectId: "153709",
@@ -795,21 +802,8 @@
             return await r.json();
         }
 
-        function getDutJiraFilters(nodeId) {
-            if (!dutJiraFilters[nodeId]) {
-                dutJiraFilters[nodeId] = {
-                    specificDut: "__ANY__",
-                    lightEquipment: "__ANY__",
-                    testChart: "__ANY__",
-                    testScene: "__ANY__",
-                };
-            }
-            return dutJiraFilters[nodeId];
-        }
-
-        function updateDutJiraFilter(nodeId, key, value) {
-            const f = getDutJiraFilters(nodeId);
-            f[key] = value;
+        function updateGlobalJiraFilter(key, value) {
+            globalJiraFilters[key] = value;
         }
 
         function buildJiraSelectOptions(values, selected) {
@@ -825,45 +819,53 @@
             return rows.join("");
         }
 
-        function renderJiraFilterControls(nodeId) {
-            const f = getDutJiraFilters(nodeId);
+        function renderGlobalJiraPanel() {
+            const panel = document.getElementById("jiraGlobalPanel");
+            if (!panel) return;
+
+            const f = globalJiraFilters;
             const syncedText = jiraCasesSynced
                 ? `Synced: ${jiraSyncMeta.targetMatched || 0} cases @ ${jiraSyncMeta.syncedAt ? new Date(jiraSyncMeta.syncedAt * 1000).toLocaleString() : "-"}`
                 : "Not synced yet";
 
-            return `
-                <div class="jira-filter-panel">
-                    <div class="jira-filter-title">Jira Auto Cases Filter</div>
+            const selectedNodeText = selectedNodeId ? `Selected DUT: ${selectedNodeId}` : "Selected DUT: (none)";
+            const syncBtnText = jiraSyncInProgress ? "⏳ Syncing..." : "📡 Sync Jira Cases";
+            const configDisabled = (!jiraCasesSynced || !selectedNodeId || jiraSyncInProgress) ? "disabled" : "";
+
+            panel.innerHTML = `
+                <div class="jira-filter-panel" style="border-bottom: 1px solid #d6dee4;">
+                    <div class="jira-filter-title">Jira Auto Cases Filter (Global)</div>
                     <div class="jira-filter-grid">
                         <div>
                             <label>Specific DUT</label>
-                            <select onchange="updateDutJiraFilter('${esc(nodeId)}', 'specificDut', this.value)">
+                            <select onchange="updateGlobalJiraFilter('specificDut', this.value)">
                                 ${buildJiraSelectOptions(jiraCaseOptions.specificDut, f.specificDut)}
                             </select>
                         </div>
                         <div>
                             <label>Light Equipment</label>
-                            <select onchange="updateDutJiraFilter('${esc(nodeId)}', 'lightEquipment', this.value)">
+                            <select onchange="updateGlobalJiraFilter('lightEquipment', this.value)">
                                 ${buildJiraSelectOptions(jiraCaseOptions.lightEquipment, f.lightEquipment)}
                             </select>
                         </div>
                         <div>
                             <label>Test Chart</label>
-                            <select onchange="updateDutJiraFilter('${esc(nodeId)}', 'testChart', this.value)">
+                            <select onchange="updateGlobalJiraFilter('testChart', this.value)">
                                 ${buildJiraSelectOptions(jiraCaseOptions.testChart, f.testChart)}
                             </select>
                         </div>
                         <div>
                             <label>Test Scene</label>
-                            <select onchange="updateDutJiraFilter('${esc(nodeId)}', 'testScene', this.value)">
+                            <select onchange="updateGlobalJiraFilter('testScene', this.value)">
                                 ${buildJiraSelectOptions(jiraCaseOptions.testScene, f.testScene)}
                             </select>
                         </div>
                     </div>
                     <div class="jira-filter-actions">
-                        <button class="btn btn-success" onclick="showJiraSyncDialog()">📡 Sync Jira Cases</button>
-                        <button class="btn btn-primary" onclick="openJiraMatchModal('${esc(nodeId)}')" ${jiraCasesSynced ? "" : "disabled"}>⚙️ 配置</button>
+                        <button class="btn btn-success" onclick="showJiraSyncDialog()" ${jiraSyncInProgress ? "disabled" : ""}>${syncBtnText}</button>
+                        <button class="btn btn-primary" onclick="openJiraMatchModal()" ${configDisabled}>⚙️ 配置</button>
                         <span class="jira-sync-meta">${esc(syncedText)}</span>
+                        <span class="jira-sync-meta">${esc(selectedNodeText)}</span>
                     </div>
                 </div>
             `;
@@ -920,14 +922,21 @@
                     </div>
                 </div>
                 <div style="display:flex; gap:0.5rem;">
-                    <button class="btn btn-success" onclick="submitJiraSync()">开始同步</button>
+                    <button id="jira-sync-submit" class="btn btn-success" onclick="submitJiraSync()" ${jiraSyncInProgress ? "disabled" : ""}>${jiraSyncInProgress ? "同步中..." : "开始同步"}</button>
                     <button class="btn" style="background:#ecf0f1" onclick="closeModal()">取消</button>
+                </div>
+                <div id="jira-sync-progress" style="margin-top:0.6rem; font-size:0.85rem; color:#7f8c8d;">
+                    ${jiraSyncInProgress ? "正在同步 Jira cases，请稍候..." : ""}
                 </div>
             `;
             openModal("Sync Jira Cases", body);
         }
 
         async function submitJiraSync() {
+            if (jiraSyncInProgress) {
+                return;
+            }
+
             const base = (document.getElementById("jira-sync-base")?.value || "").trim();
             const projectId = (document.getElementById("jira-sync-project")?.value || "").trim();
             const token = (document.getElementById("jira-sync-token")?.value || "").trim();
@@ -939,6 +948,19 @@
             jiraSyncConfig.base = base;
             jiraSyncConfig.projectId = projectId;
             jiraSyncConfig.token = token;
+
+            jiraSyncInProgress = true;
+            renderGlobalJiraPanel();
+
+            const submitBtn = document.getElementById("jira-sync-submit");
+            const progressEl = document.getElementById("jira-sync-progress");
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = "同步中...";
+            }
+            if (progressEl) {
+                progressEl.textContent = "正在同步 Jira cases，请稍候...";
+            }
 
             setGlobal("Syncing Jira cases...");
             try {
@@ -953,11 +975,13 @@
                 jiraSyncMeta = payload.meta || {};
                 jiraCaseOptions = payload.options || jiraCaseOptions;
                 closeModal();
-                if (selectedNodeId) await selectNode(selectedNodeId);
                 setGlobal(`Jira sync completed. matched=${jiraSyncMeta.targetMatched || 0}`);
             } catch (e) {
                 setGlobal(`Jira sync failed: ${e.message}`);
                 alert(`Jira sync failed: ${e.message}`);
+            } finally {
+                jiraSyncInProgress = false;
+                renderGlobalJiraPanel();
             }
         }
 
@@ -998,13 +1022,19 @@
             `;
         }
 
-        async function openJiraMatchModal(nodeId) {
+        async function openJiraMatchModal() {
             if (!jiraCasesSynced) {
                 alert("请先点击 Sync Jira Cases 完成同步");
                 return;
             }
 
-            const filters = getDutJiraFilters(nodeId);
+            if (!selectedNodeId) {
+                alert("请先在左侧选择 DUT");
+                return;
+            }
+
+            const nodeId = selectedNodeId;
+            const filters = globalJiraFilters;
             setGlobal(`Matching Jira cases for ${nodeId}...`);
             try {
                 const payload = await matchJiraCases({ nodeId, ...filters });
@@ -1125,6 +1155,7 @@
 
         async function selectNode(nodeId) {
             selectedNodeId = nodeId;
+            renderGlobalJiraPanel();
             setGlobal(`Loading ${nodeId}...`);
 
             document.querySelectorAll(".node-item").forEach(el => {
@@ -1252,8 +1283,6 @@
                 </div>
                 <div id="setupFormArea" style="display:none;"></div>
                 <div id="setupLogArea" style="display:none;"></div>
-
-                ${renderJiraFilterControls(nodeId)}
 
                 <div class="detail-content">
                     ${renderDetailContent(config, data, meta, isLoading)}
@@ -1424,7 +1453,6 @@
                 <div class="detail-actions">
                     <button class="btn btn-primary" onclick="doRefresh('${esc(nodeId)}')">🔄 Retry</button>
                 </div>
-                ${renderJiraFilterControls(nodeId)}
                 <div class="detail-content">
                     <div style="color: #e74c3c; padding: 1rem;">Error: ${esc(err)}</div>
                 </div>
@@ -1587,12 +1615,14 @@
                 setGlobal("Loading nodes... API Base=" + (apiBase || "auto (localhost:8001)"));
                 nodeList = await loadNodes();
                 renderSidebar(nodeList);
+                renderGlobalJiraPanel();
 
                 try {
                     const jiraMetaPayload = await getJiraSyncMeta();
                     jiraCasesSynced = !!jiraMetaPayload.synced;
                     jiraSyncMeta = jiraMetaPayload.meta || {};
                     jiraCaseOptions = jiraMetaPayload.options || jiraCaseOptions;
+                    renderGlobalJiraPanel();
                 } catch (e) {
                     console.log("Jira sync meta not ready: " + e.message);
                 }
