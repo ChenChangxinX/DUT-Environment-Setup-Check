@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -39,6 +39,14 @@ app.add_middleware(
 
 # Hub -> PC call timeout (long tasks)
 PC_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=60.0, pool=None)
+JIRA_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=60.0, pool=None)
+JIRA_CASES_CACHE_KEY = "jira_approved_cases"
+JIRA_EXCLUDED_FOLDERS = {
+    "/dev_nvl_hx_nit",
+    "/fpga_nit",
+    "/nvl_cit_nit",
+    "/pit-lite",
+}
 
 # ----------------------------
 # In-memory cache (replaces Redis)
@@ -88,6 +96,300 @@ def cache_set(node_id: str, data: Dict[str, Any], meta: Dict[str, Any]) -> None:
         "expires_at": time.time() + CACHE_TTL_SECONDS,
     }
     _cache_save()
+
+
+# ----------------------------
+# Jira case sync helpers
+# ----------------------------
+def _normalize_text(value: Any) -> str:
+    return " ".join(str(value or "").strip().split()).lower()
+
+
+def _normalize_field_key(value: Any) -> str:
+    return _normalize_text(value)
+
+
+def _pick_status_name(case_obj: Dict[str, Any]) -> str:
+    candidates = (
+        case_obj.get("statusName"),
+        case_obj.get("workflowStatusName"),
+        case_obj.get("status"),
+        case_obj.get("workflowStatus"),
+        (case_obj.get("status") or {}).get("name") if isinstance(case_obj.get("status"), dict) else None,
+        (case_obj.get("workflowStatus") or {}).get("name") if isinstance(case_obj.get("workflowStatus"), dict) else None,
+    )
+    for c in candidates:
+        if isinstance(c, str) and c.strip():
+            return c.strip()
+    return ""
+
+
+def _get_custom_fields(case_obj: Dict[str, Any]) -> Dict[str, Any]:
+    cf = case_obj.get("customFields")
+    return cf if isinstance(cf, dict) else {}
+
+
+def _pick_custom_field(case_obj: Dict[str, Any], field_name: str) -> str:
+    cf = _get_custom_fields(case_obj)
+    if not cf:
+        return ""
+    target = _normalize_field_key(field_name)
+    for k, v in cf.items():
+        if _normalize_field_key(k) == target:
+            return "" if v is None else str(v).strip()
+    return ""
+
+
+def _pick_folder_value(case_obj: Dict[str, Any]) -> str:
+    candidates = (
+        _pick_custom_field(case_obj, "Folder"),
+        case_obj.get("folder"),
+        case_obj.get("folderName"),
+        case_obj.get("folderPath"),
+        (case_obj.get("folder") or {}).get("name") if isinstance(case_obj.get("folder"), dict) else None,
+        (case_obj.get("folder") or {}).get("path") if isinstance(case_obj.get("folder"), dict) else None,
+    )
+    for c in candidates:
+        if isinstance(c, str) and c.strip():
+            return c.strip()
+    return ""
+
+
+def _extract_case_filter_fields(case_obj: Dict[str, Any]) -> Dict[str, str]:
+    specific_dut = _pick_custom_field(case_obj, "Specific DUT")
+    if not specific_dut:
+        specific_dut = _pick_custom_field(case_obj, "DUT")
+    return {
+        "specificDut": specific_dut,
+        "lightEquipment": _pick_custom_field(case_obj, "Light Equipment"),
+        "testChart": _pick_custom_field(case_obj, "Test Chart"),
+        "testScene": _pick_custom_field(case_obj, "Test Scene"),
+    }
+
+
+def _is_case_target(case_obj: Dict[str, Any]) -> bool:
+    status_ok = _normalize_text(_pick_status_name(case_obj)) == "approved"
+    execution_type_ok = _normalize_text(_pick_custom_field(case_obj, "Execution Type")) == "auto"
+    folder_norm = _normalize_text(_pick_folder_value(case_obj))
+    folder_is_blank = folder_norm == ""
+    folder_allowed = (folder_norm not in JIRA_EXCLUDED_FOLDERS) and (not folder_is_blank)
+    return status_ok and execution_type_ok and folder_allowed
+
+
+def _parse_list_payload(data: Any) -> List[Dict[str, Any]]:
+    if isinstance(data, list):
+        return [x for x in data if isinstance(x, dict)]
+    if isinstance(data, dict):
+        for key in ("values", "results", "items", "testCases"):
+            v = data.get(key)
+            if isinstance(v, list):
+                return [x for x in v if isinstance(x, dict)]
+    return []
+
+
+def _parse_total(data: Any) -> Optional[int]:
+    if not isinstance(data, dict):
+        return None
+    for key in ("total", "totalCount", "count"):
+        v = data.get(key)
+        if isinstance(v, int):
+            return v
+    return None
+
+
+def _build_jira_query_candidates(project_id: str, project_key: str) -> List[str]:
+    candidates: List[str] = []
+    if project_key:
+        candidates.extend(
+            [
+                f"projectKey = {project_key}",
+                f"projectKey = \"{project_key}\"",
+                f"project = {project_key}",
+                f"project = \"{project_key}\"",
+            ]
+        )
+    candidates.extend(
+        [
+            f"projectId = {project_id}",
+            f"project = {project_id}",
+            f"project = \"{project_id}\"",
+        ]
+    )
+    return candidates
+
+
+def _build_jira_fetch_attempts(project_id: str, project_key: str, start_at: int, page_size: int) -> List[Tuple[str, Dict[str, Any]]]:
+    query_candidates = _build_jira_query_candidates(project_id, project_key)
+    attempts: List[Tuple[str, Dict[str, Any]]] = []
+    for q in query_candidates:
+        attempts.append(("/rest/atm/1.0/testcase/search", {"query": q, "startAt": start_at, "maxResults": page_size}))
+    for q in query_candidates:
+        attempts.append(
+            (
+                "/rest/atm/1.0/testcase/search",
+                {"projectId": project_id, "query": q, "startAt": start_at, "maxResults": page_size},
+            )
+        )
+    attempts.append(("/rest/atm/1.0/testcase", {"projectId": project_id, "startAt": start_at, "maxResults": page_size}))
+    return attempts
+
+
+def _is_jira_query_error(status_code: int, body_text: str) -> bool:
+    if status_code != 400:
+        return False
+    low = (body_text or "").lower()
+    return (
+        "a query must be provided" in low
+        or "query statement is not valid" in low
+        or "unrecognized field" in low
+    )
+
+
+async def _jira_get_json(
+    client: httpx.AsyncClient,
+    base: str,
+    endpoint: str,
+    headers: Dict[str, str],
+    auth: Optional[Tuple[str, str]],
+    params: Optional[Dict[str, Any]] = None,
+) -> Tuple[int, str, Any]:
+    url = f"{base}{endpoint}"
+    resp = await client.get(url, params=params, headers=headers, auth=auth)
+    text = resp.text or ""
+    try:
+        data = resp.json() if text.strip() else None
+    except Exception:
+        data = None
+    return resp.status_code, text, data
+
+
+async def _resolve_project_key(
+    client: httpx.AsyncClient,
+    base: str,
+    project_id: str,
+    headers: Dict[str, str],
+    auth: Optional[Tuple[str, str]],
+) -> str:
+    code, _, data = await _jira_get_json(client, base, f"/rest/api/2/project/{project_id}", headers=headers, auth=auth)
+    if code >= 400:
+        return ""
+    if isinstance(data, dict):
+        return str(data.get("key") or "").strip()
+    return ""
+
+
+async def _fetch_project_cases(
+    base: str,
+    project_id: str,
+    headers: Dict[str, str],
+    auth: Optional[Tuple[str, str]],
+    insecure: bool,
+    page_size: int,
+) -> Tuple[List[Dict[str, Any]], str]:
+    all_items: List[Dict[str, Any]] = []
+    seen = set()
+    start_at = 0
+    selected_strategy: Optional[Tuple[str, Dict[str, Any]]] = None
+
+    async with httpx.AsyncClient(timeout=JIRA_TIMEOUT, trust_env=False, verify=(not insecure)) as client:
+        project_key = await _resolve_project_key(client, base, project_id, headers, auth)
+
+        while True:
+            if selected_strategy is None:
+                attempts = _build_jira_fetch_attempts(project_id, project_key, start_at, page_size)
+            else:
+                endpoint_template, params_template = selected_strategy
+                params = dict(params_template)
+                params["startAt"] = start_at
+                params["maxResults"] = page_size
+                attempts = [(endpoint_template, params)]
+
+            code = 0
+            text = ""
+            data = None
+            errors: List[str] = []
+
+            for endpoint, params in attempts:
+                code, text, data = await _jira_get_json(client, base, endpoint, headers=headers, auth=auth, params=params)
+                if code < 400:
+                    if selected_strategy is None:
+                        selected_strategy = (endpoint, {k: v for k, v in params.items() if k not in ("startAt", "maxResults")})
+                    break
+                if _is_jira_query_error(code, text):
+                    errors.append(f"endpoint={endpoint}, params={params}, http={code}, body={text[:300]}")
+                    continue
+                errors.append(f"endpoint={endpoint}, params={params}, http={code}, body={text[:300]}")
+
+            if code >= 400:
+                err_block = "\n".join(errors)
+                raise RuntimeError(
+                    "[Jira testcase fetch] all candidate requests failed.\n"
+                    f"projectId={project_id}, startAt={start_at}, maxResults={page_size}\n"
+                    f"attempts:\n{err_block}"
+                )
+
+            page_items = _parse_list_payload(data)
+            if not page_items:
+                break
+
+            for item in page_items:
+                uniq = item.get("id") or item.get("key") or json.dumps(item, sort_keys=True, ensure_ascii=False)
+                if uniq in seen:
+                    continue
+                seen.add(uniq)
+                all_items.append(item)
+
+            total = _parse_total(data)
+            if len(page_items) < page_size:
+                break
+            if total is not None and len(all_items) >= total:
+                break
+
+            start_at += page_size
+
+    return all_items, project_key
+
+
+def _build_filter_options(cases: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    option_sets = {
+        "specificDut": set(),
+        "lightEquipment": set(),
+        "testChart": set(),
+        "testScene": set(),
+    }
+    for case_obj in cases:
+        f = _extract_case_filter_fields(case_obj)
+        for key, value in f.items():
+            clean = str(value or "").strip()
+            if clean:
+                option_sets[key].add(clean)
+    return {k: sorted(v) for k, v in option_sets.items()}
+
+
+def _is_filter_match(case_value: str, filter_value: str) -> bool:
+    fv = str(filter_value or "").strip()
+    cv = str(case_value or "").strip()
+    if not fv or fv == "__ANY__":
+        return True
+    if fv == "__EMPTY__":
+        return cv == ""
+    return _normalize_text(cv) == _normalize_text(fv)
+
+
+def _match_cases(cases: List[Dict[str, Any]], filters: Dict[str, str]) -> List[Dict[str, Any]]:
+    matched: List[Dict[str, Any]] = []
+    for case_obj in cases:
+        f = _extract_case_filter_fields(case_obj)
+        if not _is_filter_match(f.get("specificDut", ""), filters.get("specificDut", "")):
+            continue
+        if not _is_filter_match(f.get("lightEquipment", ""), filters.get("lightEquipment", "")):
+            continue
+        if not _is_filter_match(f.get("testChart", ""), filters.get("testChart", "")):
+            continue
+        if not _is_filter_match(f.get("testScene", ""), filters.get("testScene", "")):
+            continue
+        matched.append(case_obj)
+    return matched
 
 # ----------------------------
 # Nodes
@@ -278,6 +580,150 @@ async def clear_cached(node_id: str):
 @app.get("/api/health")
 async def health():
     return {"ok": True, "cache_entries": len(_cache)}
+
+
+# ----------------------------
+# Jira case sync + match APIs
+# ----------------------------
+@app.post("/api/jira/sync-cases")
+async def jira_sync_cases(request: Request):
+    body = await request.json()
+    base = str(body.get("base") or "").strip().rstrip("/")
+    project_id = str(body.get("projectId") or "").strip()
+    token = str(body.get("token") or "").strip()
+    username = str(body.get("user") or "").strip()
+    password = str(body.get("password") or "").strip()
+    insecure = bool(body.get("insecure", False))
+    page_size = int(body.get("pageSize") or 200)
+
+    if not base:
+        raise HTTPException(status_code=400, detail="base is required")
+    if not project_id:
+        raise HTTPException(status_code=400, detail="projectId is required")
+    if page_size <= 0:
+        raise HTTPException(status_code=400, detail="pageSize must be > 0")
+    if not token and not (username and password):
+        raise HTTPException(status_code=400, detail="Auth required: token or user/password")
+
+    lock = _get_lock("jira_sync_cases")
+    if lock.locked():
+        raise HTTPException(status_code=409, detail="Jira sync already in progress")
+
+    async with lock:
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        auth: Optional[Tuple[str, str]] = None
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        else:
+            auth = (username, password)
+
+        start = time.time()
+        try:
+            all_cases, project_key = await _fetch_project_cases(
+                base=base,
+                project_id=project_id,
+                headers=headers,
+                auth=auth,
+                insecure=insecure,
+                page_size=page_size,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Jira sync failed: {e}")
+
+        filtered_cases = [x for x in all_cases if _is_case_target(x)]
+        options = _build_filter_options(filtered_cases)
+        duration_sec = round(time.time() - start, 3)
+
+        cache_set(
+            JIRA_CASES_CACHE_KEY,
+            data={
+                "cases": filtered_cases,
+                "options": options,
+            },
+            meta={
+                "projectId": project_id,
+                "projectKey": project_key,
+                "totalFetched": len(all_cases),
+                "targetMatched": len(filtered_cases),
+                "syncedAt": int(time.time()),
+                "durationSec": duration_sec,
+                "filters": {
+                    "status": "Approved",
+                    "executionType": "Auto",
+                    "folderNotIn": [
+                        "/DEV_NVL_HX_NIT",
+                        "/FPGA_NIT",
+                        "/NVL_CIT_NIT",
+                        "/PIT-Lite",
+                        "Blank (empty value)",
+                    ],
+                },
+            },
+        )
+
+        return {
+            "ok": True,
+            "meta": _cache[JIRA_CASES_CACHE_KEY]["meta"],
+            "options": options,
+        }
+
+
+@app.get("/api/jira/sync-cases")
+async def jira_get_synced_cases_meta():
+    entry = cache_get(JIRA_CASES_CACHE_KEY)
+    if not entry:
+        return {
+            "ok": True,
+            "synced": False,
+            "meta": {},
+            "options": {
+                "specificDut": [],
+                "lightEquipment": [],
+                "testChart": [],
+                "testScene": [],
+            },
+            "count": 0,
+        }
+
+    data = entry.get("data") or {}
+    cases = data.get("cases") or []
+    options = data.get("options") or _build_filter_options(cases)
+    return {
+        "ok": True,
+        "synced": True,
+        "meta": entry.get("meta") or {},
+        "options": options,
+        "count": len(cases),
+    }
+
+
+@app.post("/api/jira/match-cases")
+async def jira_match_cases(request: Request):
+    body = await request.json()
+    filters = {
+        "specificDut": str(body.get("specificDut") or ""),
+        "lightEquipment": str(body.get("lightEquipment") or ""),
+        "testChart": str(body.get("testChart") or ""),
+        "testScene": str(body.get("testScene") or ""),
+    }
+    node_id = str(body.get("nodeId") or "").strip()
+
+    entry = cache_get(JIRA_CASES_CACHE_KEY)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No synced Jira cases found. Please sync first.")
+
+    data = entry.get("data") or {}
+    cases = data.get("cases") or []
+    matched = _match_cases(cases, filters)
+
+    return {
+        "ok": True,
+        "nodeId": node_id,
+        "filters": filters,
+        "total": len(matched),
+        "cases": matched,
+        "meta": entry.get("meta") or {},
+    }
 
 
 # ----------------------------
