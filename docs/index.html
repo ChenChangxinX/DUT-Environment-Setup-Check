@@ -281,6 +281,126 @@
         .setup-log .log-err { color: #f48771; }
         .setup-log .log-done { color: #b5cea8; font-weight: bold; }
 
+        .jira-filter-panel {
+            background: #f8f9fa;
+            border-bottom: 1px solid #ddd;
+            padding: 0.8rem 1rem;
+            flex-shrink: 0;
+        }
+
+        .jira-filter-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 0.5rem;
+        }
+
+        .jira-filter-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(160px, 1fr));
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .jira-filter-grid label {
+            font-size: 0.75rem;
+            color: #7f8c8d;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .jira-filter-grid select {
+            width: 100%;
+            padding: 0.35rem 0.5rem;
+            border: 1px solid #bdc3c7;
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+
+        .jira-filter-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .jira-sync-meta {
+            font-size: 0.75rem;
+            color: #7f8c8d;
+        }
+
+        .jira-modal-mask {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        .jira-modal {
+            width: min(1100px, 92vw);
+            max-height: 85vh;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .jira-modal-header {
+            background: #34495e;
+            color: white;
+            padding: 0.65rem 0.9rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .jira-modal-body {
+            padding: 0.9rem;
+            overflow: auto;
+            font-size: 0.9rem;
+        }
+
+        .jira-modal-close {
+            background: transparent;
+            border: none;
+            color: white;
+            font-size: 1.05rem;
+            cursor: pointer;
+        }
+
+        .jira-modal-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.6rem 1rem;
+            margin-bottom: 0.8rem;
+        }
+
+        .jira-modal-grid .full {
+            grid-column: 1 / -1;
+        }
+
+        .jira-modal-grid label {
+            display: block;
+            font-size: 0.75rem;
+            color: #7f8c8d;
+            margin-bottom: 2px;
+        }
+
+        .jira-modal-grid input {
+            width: 100%;
+            padding: 0.4rem 0.6rem;
+            border: 1px solid #bdc3c7;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
         .btn {
             padding: 0.6rem 1.2rem;
             border: none;
@@ -527,6 +647,8 @@
         </main>
     </div>
 
+    <div id="jiraModalMask" class="jira-modal-mask"></div>
+
     <script>
         // ==================== Configuration ====================
         // Auto-detect localhost for local development
@@ -540,6 +662,21 @@
         const serverMeta = {};
         let nodeList = [];
         let selectedNodeId = null;
+        let jiraCasesSynced = false;
+        let jiraSyncMeta = {};
+        let jiraCaseOptions = {
+            specificDut: [],
+            lightEquipment: [],
+            testChart: [],
+            testScene: [],
+        };
+        const dutJiraFilters = {};
+        const jiraSyncConfig = {
+            base: "https://jira.devtools.intel.com",
+            projectId: "153709",
+            token: "",
+            insecure: true,
+        };
 
         // ==================== Utilities ====================
         function setGlobal(msg) {
@@ -623,6 +760,265 @@
             const payload = await r.json();
             if (payload.meta) serverMeta[nodeId] = payload.meta;
             return payload;
+        }
+
+        async function getJiraSyncMeta() {
+            const r = await fetch(apiUrl("/api/jira/sync-cases"));
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return await r.json();
+        }
+
+        async function syncJiraCases(payload) {
+            const r = await fetch(apiUrl("/api/jira/sync-cases"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            if (!r.ok) {
+                const err = await r.json().catch(() => ({ detail: `HTTP ${r.status}` }));
+                throw new Error(err.detail || `HTTP ${r.status}`);
+            }
+            return await r.json();
+        }
+
+        async function matchJiraCases(payload) {
+            const r = await fetch(apiUrl("/api/jira/match-cases"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            if (!r.ok) {
+                const err = await r.json().catch(() => ({ detail: `HTTP ${r.status}` }));
+                throw new Error(err.detail || `HTTP ${r.status}`);
+            }
+            return await r.json();
+        }
+
+        function getDutJiraFilters(nodeId) {
+            if (!dutJiraFilters[nodeId]) {
+                dutJiraFilters[nodeId] = {
+                    specificDut: "__ANY__",
+                    lightEquipment: "__ANY__",
+                    testChart: "__ANY__",
+                    testScene: "__ANY__",
+                };
+            }
+            return dutJiraFilters[nodeId];
+        }
+
+        function updateDutJiraFilter(nodeId, key, value) {
+            const f = getDutJiraFilters(nodeId);
+            f[key] = value;
+        }
+
+        function buildJiraSelectOptions(values, selected) {
+            const rows = [
+                `<option value="__ANY__" ${selected === "__ANY__" ? "selected" : ""}>Any</option>`,
+                `<option value="__EMPTY__" ${selected === "__EMPTY__" ? "selected" : ""}>(Empty)</option>`,
+            ];
+            (values || []).forEach(v => {
+                const escV = esc(v);
+                const isSel = selected === v ? "selected" : "";
+                rows.push(`<option value="${escV}" ${isSel}>${escV}</option>`);
+            });
+            return rows.join("");
+        }
+
+        function renderJiraFilterControls(nodeId) {
+            const f = getDutJiraFilters(nodeId);
+            const syncedText = jiraCasesSynced
+                ? `Synced: ${jiraSyncMeta.targetMatched || 0} cases @ ${jiraSyncMeta.syncedAt ? new Date(jiraSyncMeta.syncedAt * 1000).toLocaleString() : "-"}`
+                : "Not synced yet";
+
+            return `
+                <div class="jira-filter-panel">
+                    <div class="jira-filter-title">Jira Auto Cases Filter</div>
+                    <div class="jira-filter-grid">
+                        <div>
+                            <label>Specific DUT</label>
+                            <select onchange="updateDutJiraFilter('${esc(nodeId)}', 'specificDut', this.value)">
+                                ${buildJiraSelectOptions(jiraCaseOptions.specificDut, f.specificDut)}
+                            </select>
+                        </div>
+                        <div>
+                            <label>Light Equipment</label>
+                            <select onchange="updateDutJiraFilter('${esc(nodeId)}', 'lightEquipment', this.value)">
+                                ${buildJiraSelectOptions(jiraCaseOptions.lightEquipment, f.lightEquipment)}
+                            </select>
+                        </div>
+                        <div>
+                            <label>Test Chart</label>
+                            <select onchange="updateDutJiraFilter('${esc(nodeId)}', 'testChart', this.value)">
+                                ${buildJiraSelectOptions(jiraCaseOptions.testChart, f.testChart)}
+                            </select>
+                        </div>
+                        <div>
+                            <label>Test Scene</label>
+                            <select onchange="updateDutJiraFilter('${esc(nodeId)}', 'testScene', this.value)">
+                                ${buildJiraSelectOptions(jiraCaseOptions.testScene, f.testScene)}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="jira-filter-actions">
+                        <button class="btn btn-success" onclick="showJiraSyncDialog()">📡 Sync Jira Cases</button>
+                        <button class="btn btn-primary" onclick="openJiraMatchModal('${esc(nodeId)}')" ${jiraCasesSynced ? "" : "disabled"}>⚙️ 配置</button>
+                        <span class="jira-sync-meta">${esc(syncedText)}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function _pickCaseCustomField(caseObj, names) {
+            const cf = caseObj?.customFields || {};
+            if (!cf || typeof cf !== "object") return "";
+            const keys = Object.keys(cf);
+            for (const name of names) {
+                const target = String(name || "").trim().toLowerCase();
+                const key = keys.find(k => String(k || "").trim().toLowerCase() === target);
+                if (key && cf[key] != null && String(cf[key]).trim()) return String(cf[key]).trim();
+            }
+            return "";
+        }
+
+        function openModal(title, bodyHtml) {
+            const mask = document.getElementById("jiraModalMask");
+            if (!mask) return;
+            mask.innerHTML = `
+                <div class="jira-modal">
+                    <div class="jira-modal-header">
+                        <span>${esc(title)}</span>
+                        <button class="jira-modal-close" onclick="closeModal()">✕</button>
+                    </div>
+                    <div class="jira-modal-body">${bodyHtml}</div>
+                </div>
+            `;
+            mask.style.display = "flex";
+        }
+
+        function closeModal() {
+            const mask = document.getElementById("jiraModalMask");
+            if (!mask) return;
+            mask.style.display = "none";
+            mask.innerHTML = "";
+        }
+
+        function showJiraSyncDialog() {
+            const body = `
+                <div class="jira-modal-grid">
+                    <div>
+                        <label>Jira Base URL *</label>
+                        <input id="jira-sync-base" value="${esc(jiraSyncConfig.base)}">
+                    </div>
+                    <div>
+                        <label>Project ID *</label>
+                        <input id="jira-sync-project" value="${esc(jiraSyncConfig.projectId)}">
+                    </div>
+                    <div class="full">
+                        <label>Token *</label>
+                        <input id="jira-sync-token" type="password" placeholder="Bearer token (not persisted)">
+                    </div>
+                </div>
+                <div style="display:flex; gap:0.5rem;">
+                    <button class="btn btn-success" onclick="submitJiraSync()">开始同步</button>
+                    <button class="btn" style="background:#ecf0f1" onclick="closeModal()">取消</button>
+                </div>
+            `;
+            openModal("Sync Jira Cases", body);
+        }
+
+        async function submitJiraSync() {
+            const base = (document.getElementById("jira-sync-base")?.value || "").trim();
+            const projectId = (document.getElementById("jira-sync-project")?.value || "").trim();
+            const token = (document.getElementById("jira-sync-token")?.value || "").trim();
+            if (!base || !projectId || !token) {
+                alert("请填写 base/projectId/token");
+                return;
+            }
+
+            jiraSyncConfig.base = base;
+            jiraSyncConfig.projectId = projectId;
+            jiraSyncConfig.token = token;
+
+            setGlobal("Syncing Jira cases...");
+            try {
+                const payload = await syncJiraCases({
+                    base,
+                    projectId,
+                    token,
+                    insecure: jiraSyncConfig.insecure,
+                    pageSize: 200,
+                });
+                jiraCasesSynced = true;
+                jiraSyncMeta = payload.meta || {};
+                jiraCaseOptions = payload.options || jiraCaseOptions;
+                closeModal();
+                if (selectedNodeId) await selectNode(selectedNodeId);
+                setGlobal(`Jira sync completed. matched=${jiraSyncMeta.targetMatched || 0}`);
+            } catch (e) {
+                setGlobal(`Jira sync failed: ${e.message}`);
+                alert(`Jira sync failed: ${e.message}`);
+            }
+        }
+
+        function renderMatchCasesTable(cases) {
+            if (!cases || cases.length === 0) {
+                return `<div style="color:#7f8c8d;">No matched cases.</div>`;
+            }
+            const rows = cases.map(c => {
+                const specificDut = _pickCaseCustomField(c, ["Specific DUT", "DUT"]);
+                const lightEquipment = _pickCaseCustomField(c, ["Light Equipment"]);
+                const testChart = _pickCaseCustomField(c, ["Test Chart"]);
+                const testScene = _pickCaseCustomField(c, ["Test Scene"]);
+                return `
+                    <tr>
+                        <td>${esc(c.key || c.testCaseKey || c.id || "")}</td>
+                        <td>${esc(c.name || c.title || c.summary || "")}</td>
+                        <td>${esc(specificDut)}</td>
+                        <td>${esc(lightEquipment)}</td>
+                        <td>${esc(testChart)}</td>
+                        <td>${esc(testScene)}</td>
+                    </tr>
+                `;
+            }).join("");
+            return `
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Case Key</th>
+                            <th>Name</th>
+                            <th>Specific DUT</th>
+                            <th>Light Equipment</th>
+                            <th>Test Chart</th>
+                            <th>Test Scene</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            `;
+        }
+
+        async function openJiraMatchModal(nodeId) {
+            if (!jiraCasesSynced) {
+                alert("请先点击 Sync Jira Cases 完成同步");
+                return;
+            }
+
+            const filters = getDutJiraFilters(nodeId);
+            setGlobal(`Matching Jira cases for ${nodeId}...`);
+            try {
+                const payload = await matchJiraCases({ nodeId, ...filters });
+                const body = `
+                    <div style="margin-bottom:0.7rem; color:#2c3e50;">
+                        <strong>Node:</strong> ${esc(nodeId)} &nbsp;&nbsp; <strong>Matched:</strong> ${payload.total || 0}
+                    </div>
+                    ${renderMatchCasesTable(payload.cases || [])}
+                `;
+                openModal(`Matched Cases - ${nodeId}`, body);
+                setGlobal(`Matched ${payload.total || 0} Jira cases for ${nodeId}`);
+            } catch (e) {
+                setGlobal(`Match failed: ${e.message}`);
+                alert(`Match failed: ${e.message}`);
+            }
         }
 
         // ==================== UI Rendering ====================
@@ -856,6 +1252,8 @@
                 <div id="setupFormArea" style="display:none;"></div>
                 <div id="setupLogArea" style="display:none;"></div>
 
+                ${renderJiraFilterControls(nodeId)}
+
                 <div class="detail-content">
                     ${renderDetailContent(config, data, meta, isLoading)}
                 </div>
@@ -1025,6 +1423,7 @@
                 <div class="detail-actions">
                     <button class="btn btn-primary" onclick="doRefresh('${esc(nodeId)}')">🔄 Retry</button>
                 </div>
+                ${renderJiraFilterControls(nodeId)}
                 <div class="detail-content">
                     <div style="color: #e74c3c; padding: 1rem;">Error: ${esc(err)}</div>
                 </div>
@@ -1183,18 +1582,42 @@
                 return;
             }
 
-            setGlobal("Loading nodes... API Base=" + (apiBase || "auto (localhost:8001)"));
-            nodeList = await loadNodes();
-            renderSidebar(nodeList);
+            try {
+                setGlobal("Loading nodes... API Base=" + (apiBase || "auto (localhost:8001)"));
+                nodeList = await loadNodes();
+                renderSidebar(nodeList);
 
-            setGlobal("Syncing server cache...");
-            await syncAllCached();
+                try {
+                    const jiraMetaPayload = await getJiraSyncMeta();
+                    jiraCasesSynced = !!jiraMetaPayload.synced;
+                    jiraSyncMeta = jiraMetaPayload.meta || {};
+                    jiraCaseOptions = jiraMetaPayload.options || jiraCaseOptions;
+                } catch (e) {
+                    console.log("Jira sync meta not ready: " + e.message);
+                }
 
-            if (nodeList.length > 0) {
-                await selectNode(nodeList[0].id);
+                setGlobal("Syncing server cache...");
+                await syncAllCached();
+
+                if (nodeList.length > 0) {
+                    await selectNode(nodeList[0].id);
+                }
+
+                setGlobal("Ready.");
+            } catch (e) {
+                const msg = "Backend unreachable: " + (e?.message || e);
+                setGlobal(msg);
+                const emptyState = document.getElementById("emptyState");
+                emptyState.innerHTML = `
+                    <div style="text-align: center; padding: 2rem; color: #c0392b;">
+                        <p style="font-size: 1rem; margin-bottom: 0.75rem;">Cannot connect to backend API</p>
+                        <p style="font-size: 0.9rem; color: #666;">${esc(msg)}</p>
+                        <p style="font-size: 0.85rem; color: #999; margin-top: 0.75rem;">
+                            Please start backend service on port 8001, or configure API Base URL.
+                        </p>
+                    </div>
+                `;
             }
-
-            setGlobal("Ready.");
         })();
     </script>
 </body>
