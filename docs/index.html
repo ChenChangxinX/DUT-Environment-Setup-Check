@@ -402,6 +402,19 @@
             font-size: 0.85rem;
         }
 
+        .jira-cases-table-wrap {
+            max-height: 58vh;
+            overflow: auto;
+            border: 1px solid #dfe6e9;
+            border-radius: 6px;
+            background: #fff;
+        }
+
+        .jira-cases-table-wrap .table {
+            min-width: 1300px;
+            margin: 0;
+        }
+
         .btn {
             padding: 0.6rem 1.2rem;
             border: none;
@@ -990,10 +1003,11 @@
                 return `<div style="color:#7f8c8d;">No matched cases.</div>`;
             }
             const rows = cases.map(c => {
-                const specificDut = _pickCaseCustomField(c, ["Specific DUT", "DUT"]);
+                const specificDut = _pickCaseCustomField(c, ["Specific DUT"]);
                 const lightEquipment = _pickCaseCustomField(c, ["Light Equipment"]);
                 const testChart = _pickCaseCustomField(c, ["Test Chart"]);
                 const testScene = _pickCaseCustomField(c, ["Test Scene"]);
+                const parameters = _pickCaseCustomField(c, ["Parameters"]);
                 return `
                     <tr>
                         <td>${esc(c.key || c.testCaseKey || c.id || "")}</td>
@@ -1002,23 +1016,27 @@
                         <td>${esc(lightEquipment)}</td>
                         <td>${esc(testChart)}</td>
                         <td>${esc(testScene)}</td>
+                        <td>${esc(parameters)}</td>
                     </tr>
                 `;
             }).join("");
             return `
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Case Key</th>
-                            <th>Name</th>
-                            <th>Specific DUT</th>
-                            <th>Light Equipment</th>
-                            <th>Test Chart</th>
-                            <th>Test Scene</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                </table>
+                <div class="jira-cases-table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Case Key</th>
+                                <th>Name</th>
+                                <th>Specific DUT</th>
+                                <th>Light Equipment</th>
+                                <th>Test Chart</th>
+                                <th>Test Scene</th>
+                                <th>Parameters</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
             `;
         }
 
