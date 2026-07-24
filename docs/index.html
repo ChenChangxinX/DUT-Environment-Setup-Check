@@ -1382,6 +1382,26 @@
             return [];
         }
 
+        function _deriveManualBoardType(row, envMeta) {
+            const title = String(_pickJsonFieldValue(row, ["title", "name", "summary"]) || "").toUpperCase();
+            const titleMatches = Array.from(new Set(Array.from(title.matchAll(/\b(DC2|DC1|GC)\b/g)).map(m => m[1])));
+            if (titleMatches.length > 0) return titleMatches.join("/");
+
+            const aobText = String(envMeta?.aob || _pickJsonFieldValue(row, ["AOB", "aob"]) || "").toUpperCase();
+            if (!aobText) return "";
+
+            const hasOv13b = aobText.includes("OV13B");
+            const hasOg0va1b = aobText.includes("OG0VA1B");
+            const hasOv08x40 = aobText.includes("OV08X40");
+            const hasImx688 = aobText.includes("IMX688");
+
+            if (hasOv13b && hasOg0va1b && hasOv08x40) return "GC";
+            if (hasOv13b && hasImx688) return "DC2";
+            if (hasOg0va1b && hasOv08x40) return "DC1";
+            if (hasImx688) return "DC2";
+            return "";
+        }
+
         function _renderManualJsonTable(rows, fileName) {
             const content = document.getElementById("triggerContent");
             if (!content) return;
@@ -1396,8 +1416,7 @@
                 const submittedBy = _pickJsonFieldValue(r, ["submitted_by", "submitted by", "submittedBy"]);
                 const status = _pickJsonFieldValue(r, ["status"]);
                 const envMeta = _extractTestEnvironmentMeta(r);
-                const rvpType = _pickJsonFieldValue(r, ["RVP type", "rvp type", "rvp_type", "rvpType"]) || envMeta.rvpType;
-                const aob = _pickJsonFieldValue(r, ["AOB", "aob"]) || envMeta.aob;
+                const rvpType = _deriveManualBoardType(r, envMeta);
                 const referenceCasesItems = _pickJsonFieldValue(r, ["reference_cases_items", "reference cases items", "referenceCasesItems"]);
                 return `
                     <tr>
@@ -1406,7 +1425,6 @@
                         <td>${esc(submittedBy)}</td>
                         <td>${esc(status)}</td>
                         <td>${esc(rvpType)}</td>
-                        <td>${esc(aob)}</td>
                         <td>${esc(referenceCasesItems)}</td>
                     </tr>
                 `;
@@ -1425,7 +1443,6 @@
                                 <th>submitted_by</th>
                                 <th>status</th>
                                 <th>RVP type</th>
-                                <th>AOB</th>
                                 <th>reference_cases_items</th>
                             </tr>
                         </thead>
