@@ -1411,6 +1411,18 @@
             return "";
         }
 
+        function _extractManualAobSensors(row, envMeta) {
+            const aobText = String(envMeta?.aob || _pickJsonFieldValue(row, ["AOB", "aob"]) || "").toUpperCase();
+            if (!aobText) return "";
+
+            const sensors = [];
+            if (aobText.includes("OV13B10") || aobText.includes("OV13B")) sensors.push("OV13B10");
+            if (aobText.includes("OG0VA1B")) sensors.push("OG0VA1B");
+            if (aobText.includes("OV08X40")) sensors.push("OV08X40");
+            if (aobText.includes("IMX688")) sensors.push("IMX688");
+            return Array.from(new Set(sensors)).join(" ");
+        }
+
         function _renderManualJsonTable(rows, fileName) {
             const content = document.getElementById("triggerContent");
             if (!content) return;
@@ -1427,6 +1439,7 @@
                 const status = _pickJsonFieldValue(r, ["status"]);
                 const envMeta = _extractTestEnvironmentMeta(r);
                 const rvpType = _deriveManualBoardType(r, envMeta);
+                const aob = _extractManualAobSensors(r, envMeta);
                 const referenceCasesItems = _pickJsonFieldValue(r, ["reference_cases_items", "reference cases items", "referenceCasesItems"]);
                 return `
                     <tr>
@@ -1435,6 +1448,7 @@
                         <td>${esc(submittedBy)}</td>
                         <td>${esc(status)}</td>
                         <td>${esc(rvpType)}</td>
+                        <td>${esc(aob)}</td>
                         <td>${esc(referenceCasesItems)}</td>
                     </tr>
                 `;
@@ -1453,6 +1467,7 @@
                                 <th>submitted_by</th>
                                 <th>status</th>
                                 <th>RVP type</th>
+                                <th>AOB</th>
                                 <th>reference_cases_items</th>
                             </tr>
                         </thead>
