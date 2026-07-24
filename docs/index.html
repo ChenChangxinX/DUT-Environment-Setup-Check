@@ -1075,7 +1075,11 @@
             return (cases || []).filter(c => {
                 const testConfig = String(_pickCaseCustomField(c, ["Test Config"]) || "").toUpperCase();
                 if (!testConfig) return false;
-                return testConfig.includes(key);
+                if (key === "GC") return testConfig.includes("GC");
+                if (key === "DC") return testConfig.includes("NVL_UPH_DC2");
+                if (key === "CVS") return testConfig.includes("CVS");
+                if (key === "S688") return testConfig.includes("NVL_HX_DC2") || testConfig.includes("688");
+                return false;
             });
         }
 
