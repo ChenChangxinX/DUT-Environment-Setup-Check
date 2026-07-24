@@ -1263,7 +1263,10 @@
             const syncBtnText = jiraSyncInProgress ? "⏳ Syncing..." : "📡 Sync Jira Cases";
             const isManual = triggerType === "manual";
             const actionButtons = isManual
-                ? `<button class="btn btn-success" onclick="showJiraSyncDialog()" ${jiraSyncInProgress ? "disabled" : ""}>${syncBtnText}</button>`
+                ? `
+                    <button class="btn btn-success" onclick="showJiraSyncDialog()" ${jiraSyncInProgress ? "disabled" : ""}>${syncBtnText}</button>
+                    <button class="btn btn-primary" onclick="openManualJsonFilePicker()">📄 解析 JSON 文件</button>
+                `
                 : `<button class="btn btn-primary" onclick="refreshTriggerPage('${esc(triggerType)}')" style="margin-bottom: 1rem;">🔄 刷新</button>`;
             
             // Ensure detailPanel is visible
@@ -1286,12 +1289,127 @@
                 <div class="detail-actions">
                     ${actionButtons}
                 </div>
+                <input id="manualJsonInput" type="file" accept="application/json,.json" style="display:none;" onchange="handleManualJsonFile(event)">
                 <div class="detail-content" id="triggerContent">
                     <div style="padding: 1rem; color: #7f8c8d;">
                         ${triggerType === 'manual' ? 'Manual Trigger 页面' : 'Auto Trigger 页面'}
                     </div>
                 </div>
             `;
+        }
+
+        function _normalizeJsonFieldKey(key) {
+            return String(key || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        }
+
+        function _pickJsonFieldValue(row, aliases) {
+            if (!row || typeof row !== "object") return "";
+            const keys = Object.keys(row);
+            const normMap = {};
+            keys.forEach(k => { normMap[_normalizeJsonFieldKey(k)] = k; });
+            for (const alias of aliases) {
+                const hit = normMap[_normalizeJsonFieldKey(alias)];
+                if (hit) {
+                    const v = row[hit];
+                    if (v == null) return "";
+                    if (Array.isArray(v)) return v.map(x => (typeof x === "object" ? JSON.stringify(x) : String(x))).join("; ");
+                    if (typeof v === "object") return JSON.stringify(v);
+                    return String(v);
+                }
+            }
+            return "";
+        }
+
+        function _extractJsonRows(data) {
+            if (Array.isArray(data)) return data.filter(x => x && typeof x === "object");
+            if (!data || typeof data !== "object") return [];
+            const candidates = [data.cases, data.items, data.results, data.values];
+            for (const c of candidates) {
+                if (Array.isArray(c)) return c.filter(x => x && typeof x === "object");
+            }
+            return [];
+        }
+
+        function _renderManualJsonTable(rows, fileName) {
+            const content = document.getElementById("triggerContent");
+            if (!content) return;
+            if (!rows || rows.length === 0) {
+                content.innerHTML = `<div style="padding:1rem;color:#7f8c8d;">文件 ${esc(fileName || "-")} 未找到可展示的记录。</div>`;
+                return;
+            }
+
+            const tableRows = rows.map(r => {
+                const hsdId = _pickJsonFieldValue(r, ["hsd id", "hsd_id", "hsdId"]);
+                const updatedDate = _pickJsonFieldValue(r, ["updated_date", "updated date", "updatedDate"]);
+                const submittedBy = _pickJsonFieldValue(r, ["submitted_by", "submitted by", "submittedBy"]);
+                const status = _pickJsonFieldValue(r, ["status"]);
+                const rvpType = _pickJsonFieldValue(r, ["RVP type", "rvp type", "rvp_type", "rvpType"]);
+                const aob = _pickJsonFieldValue(r, ["AOB", "aob"]);
+                const referenceCasesItems = _pickJsonFieldValue(r, ["reference_cases_items", "reference cases items", "referenceCasesItems"]);
+                return `
+                    <tr>
+                        <td>${esc(hsdId)}</td>
+                        <td>${esc(updatedDate)}</td>
+                        <td>${esc(submittedBy)}</td>
+                        <td>${esc(status)}</td>
+                        <td>${esc(rvpType)}</td>
+                        <td>${esc(aob)}</td>
+                        <td>${esc(referenceCasesItems)}</td>
+                    </tr>
+                `;
+            }).join("");
+
+            content.innerHTML = `
+                <div style="margin-bottom:0.7rem; color:#2c3e50;">
+                    <strong>JSON File:</strong> ${esc(fileName || "-")} &nbsp;&nbsp; <strong>Rows:</strong> ${rows.length}
+                </div>
+                <div class="jira-cases-table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>hsd id</th>
+                                <th>updated_date</th>
+                                <th>submitted_by</th>
+                                <th>status</th>
+                                <th>RVP type</th>
+                                <th>AOB</th>
+                                <th>reference_cases_items</th>
+                            </tr>
+                        </thead>
+                        <tbody>${tableRows}</tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function openManualJsonFilePicker() {
+            const input = document.getElementById("manualJsonInput");
+            if (!input) return;
+            input.value = "";
+            input.click();
+        }
+
+        function handleManualJsonFile(event) {
+            const file = event?.target?.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const text = String(reader.result || "");
+                    const data = JSON.parse(text);
+                    const rows = _extractJsonRows(data);
+                    _renderManualJsonTable(rows, file.name);
+                    setGlobal(`JSON parsed: ${file.name} (${rows.length} rows)`);
+                } catch (e) {
+                    setGlobal(`JSON parse failed: ${e.message}`);
+                    alert(`JSON parse failed: ${e.message}`);
+                }
+            };
+            reader.onerror = () => {
+                setGlobal("JSON read failed");
+                alert("读取 JSON 文件失败");
+            };
+            reader.readAsText(file, "utf-8");
         }
 
         function refreshTriggerPage(triggerType) {
