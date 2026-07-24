@@ -1214,9 +1214,10 @@
         function renderTriggerPanel(triggerType) {
             const content = document.getElementById("detailPanel");
             const syncBtnText = jiraSyncInProgress ? "⏳ Syncing..." : "📡 Sync Jira Cases";
-            const manualSyncAction = triggerType === "manual"
+            const isManual = triggerType === "manual";
+            const actionButtons = isManual
                 ? `<button class="btn btn-success" onclick="showJiraSyncDialog()" ${jiraSyncInProgress ? "disabled" : ""}>${syncBtnText}</button>`
-                : "";
+                : `<button class="btn btn-primary" onclick="refreshTriggerPage('${esc(triggerType)}')" style="margin-bottom: 1rem;">🔄 刷新</button>`;
             
             // Ensure detailPanel is visible
             if (document.getElementById("emptyState")) {
@@ -1236,8 +1237,7 @@
                     <h2>⚡ Trigger: ${esc(triggerType)}</h2>
                 </div>
                 <div class="detail-actions">
-                    <button class="btn btn-primary" onclick="refreshTriggerPage('${esc(triggerType)}')" style="margin-bottom: 1rem;">🔄 刷新</button>
-                    ${manualSyncAction}
+                    ${actionButtons}
                 </div>
                 <div class="detail-content" id="triggerContent">
                     <div style="padding: 1rem; color: #7f8c8d;">
