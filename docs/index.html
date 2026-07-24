@@ -1302,22 +1302,45 @@
             return String(key || "").toLowerCase().replace(/[^a-z0-9]/g, "");
         }
 
-        function _pickJsonFieldValue(row, aliases) {
-            if (!row || typeof row !== "object") return "";
+        function _pickJsonFieldRaw(row, aliases) {
+            if (!row || typeof row !== "object") return undefined;
             const keys = Object.keys(row);
             const normMap = {};
             keys.forEach(k => { normMap[_normalizeJsonFieldKey(k)] = k; });
             for (const alias of aliases) {
                 const hit = normMap[_normalizeJsonFieldKey(alias)];
-                if (hit) {
-                    const v = row[hit];
-                    if (v == null) return "";
-                    if (Array.isArray(v)) return v.map(x => (typeof x === "object" ? JSON.stringify(x) : String(x))).join("; ");
-                    if (typeof v === "object") return JSON.stringify(v);
-                    return String(v);
+                if (hit) return row[hit];
+            }
+            return undefined;
+        }
+
+        function _pickJsonFieldValue(row, aliases) {
+            const v = _pickJsonFieldRaw(row, aliases);
+            if (v == null) return "";
+            if (Array.isArray(v)) return v.map(x => (typeof x === "object" ? JSON.stringify(x) : String(x))).join("; ");
+            if (typeof v === "object") return JSON.stringify(v);
+            return String(v);
+        }
+
+        function _extractTestEnvironmentMeta(row) {
+            const testEnvRaw = _pickJsonFieldRaw(row, ["Test environment", "test environment", "test_environment", "testEnvironment"]);
+            if (testEnvRaw == null) return { rvpType: "", aob: "" };
+
+            if (typeof testEnvRaw === "object" && !Array.isArray(testEnvRaw)) {
+                const rvpFromObj = _pickJsonFieldValue(testEnvRaw, ["RVP type", "rvp type", "rvp_type", "rvpType", "RVP"]);
+                const aobFromObj = _pickJsonFieldValue(testEnvRaw, ["AOB", "aob"]);
+                if (rvpFromObj || aobFromObj) {
+                    return { rvpType: rvpFromObj || "", aob: aobFromObj || "" };
                 }
             }
-            return "";
+
+            const text = typeof testEnvRaw === "string" ? testEnvRaw : JSON.stringify(testEnvRaw);
+            const rvpMatch = text.match(/rvp\s*(type)?\s*[:=]\s*([^,;\n\r|]+)/i);
+            const aobMatch = text.match(/aob\s*[:=]\s*([^,;\n\r|]+)/i);
+            return {
+                rvpType: rvpMatch ? String(rvpMatch[2] || "").trim() : "",
+                aob: aobMatch ? String(aobMatch[1] || "").trim() : "",
+            };
         }
 
         function _extractJsonRows(data) {
@@ -1339,12 +1362,13 @@
             }
 
             const tableRows = rows.map(r => {
-                const hsdId = _pickJsonFieldValue(r, ["hsd id", "hsd_id", "hsdId"]);
+                const hsdId = _pickJsonFieldValue(r, ["id", "hsd id", "hsd_id", "hsdId"]);
                 const updatedDate = _pickJsonFieldValue(r, ["updated_date", "updated date", "updatedDate"]);
                 const submittedBy = _pickJsonFieldValue(r, ["submitted_by", "submitted by", "submittedBy"]);
                 const status = _pickJsonFieldValue(r, ["status"]);
-                const rvpType = _pickJsonFieldValue(r, ["RVP type", "rvp type", "rvp_type", "rvpType"]);
-                const aob = _pickJsonFieldValue(r, ["AOB", "aob"]);
+                const envMeta = _extractTestEnvironmentMeta(r);
+                const rvpType = _pickJsonFieldValue(r, ["RVP type", "rvp type", "rvp_type", "rvpType"]) || envMeta.rvpType;
+                const aob = _pickJsonFieldValue(r, ["AOB", "aob"]) || envMeta.aob;
                 const referenceCasesItems = _pickJsonFieldValue(r, ["reference_cases_items", "reference cases items", "referenceCasesItems"]);
                 return `
                     <tr>
