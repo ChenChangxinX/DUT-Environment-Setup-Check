@@ -677,6 +677,7 @@
         const serverMeta = {};
         let nodeList = [];
         let selectedNodeId = null;
+        let selectedTriggerType = null;
         let jiraCasesSynced = false;
         let jiraSyncMeta = {};
         let jiraCaseOptions = {
@@ -835,8 +836,10 @@
         function renderGlobalJiraPanel() {
             const panel = document.getElementById("jiraGlobalPanel");
             if (!panel) return;
-            panel.innerHTML = "";
-            return;
+            if (selectedTriggerType === "manual") {
+                panel.innerHTML = "";
+                return;
+            }
 
             const f = globalJiraFilters;
             const syncedText = jiraCasesSynced
@@ -1172,6 +1175,7 @@
         }
 
         async function selectNode(nodeId) {
+            selectedTriggerType = null;
             selectedNodeId = nodeId;
             renderGlobalJiraPanel();
             setGlobal(`Loading ${nodeId}...`);
@@ -1204,12 +1208,14 @@
         }
 
         function selectTrigger(triggerType) {
+            selectedTriggerType = triggerType;
             setGlobal(`Trigger: ${triggerType}`);
 
             document.querySelectorAll(".node-item").forEach(el => {
                 el.classList.toggle("active", el.dataset.triggerType === triggerType);
             });
 
+            renderGlobalJiraPanel();
             renderTriggerPanel(triggerType);
         }
 
