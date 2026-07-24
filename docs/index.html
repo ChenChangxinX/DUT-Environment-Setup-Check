@@ -678,6 +678,7 @@
         let nodeList = [];
         let selectedNodeId = null;
         let selectedTriggerType = null;
+        let manualJsonTableState = { rows: null, fileName: "" };
         let jiraCasesSynced = false;
         let jiraSyncMeta = {};
         let jiraCaseOptions = {
@@ -1296,6 +1297,10 @@
                     </div>
                 </div>
             `;
+
+            if (isManual && manualJsonTableState.rows) {
+                _renderManualJsonTable(manualJsonTableState.rows, manualJsonTableState.fileName);
+            }
         }
 
         function _normalizeJsonFieldKey(key) {
@@ -1405,6 +1410,7 @@
         function _renderManualJsonTable(rows, fileName) {
             const content = document.getElementById("triggerContent");
             if (!content) return;
+            manualJsonTableState = { rows: rows || [], fileName: fileName || "" };
             if (!rows || rows.length === 0) {
                 content.innerHTML = `<div style="padding:1rem;color:#7f8c8d;">文件 ${esc(fileName || "-")} 未找到可展示的记录。</div>`;
                 return;
