@@ -1335,11 +1335,22 @@
             }
 
             const text = typeof testEnvRaw === "string" ? testEnvRaw : JSON.stringify(testEnvRaw);
-            const rvpMatch = text.match(/rvp\s*(type)?\s*[:=]\s*([^,;\n\r|]+)/i);
-            const aobMatch = text.match(/aob\s*[:=]\s*([^,;\n\r|]+)/i);
+            const kv = {};
+            text.split(/\r?\n/).forEach(line => {
+                const m = String(line || "").match(/^\s*([^:=]+?)\s*[:=]\s*(.*?)\s*$/);
+                if (!m) return;
+                const key = _normalizeJsonFieldKey(m[1]);
+                kv[key] = m[2] || "";
+            });
+
+            const rvpFromLines = kv["rvptype"] || kv["rvp"] || "";
+            const aobFromLines = kv["aob"] || "";
+
+            const rvpMatch = text.match(/rvp\s*type\s*[:=]\s*([^\n\r|]+)/i);
+            const aobMatch = text.match(/aob\s*[:=]\s*([^\n\r|]+)/i);
             return {
-                rvpType: rvpMatch ? String(rvpMatch[2] || "").trim() : "",
-                aob: aobMatch ? String(aobMatch[1] || "").trim() : "",
+                rvpType: String(rvpFromLines || (rvpMatch ? rvpMatch[1] : "") || "").trim(),
+                aob: String(aobFromLines || (aobMatch ? aobMatch[1] : "") || "").trim(),
             };
         }
 
