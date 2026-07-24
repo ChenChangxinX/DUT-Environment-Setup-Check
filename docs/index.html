@@ -1323,7 +1323,13 @@
         }
 
         function _extractTestEnvironmentMeta(row) {
-            const testEnvRaw = _pickJsonFieldRaw(row, ["Test environment", "test environment", "test_environment", "testEnvironment"]);
+            let testEnvRaw = _pickJsonFieldRaw(row, ["Test environment", "test environment", "test_environment", "testEnvironment"]);
+            if (testEnvRaw == null) {
+                const descModulesRaw = _pickJsonFieldRaw(row, ["description_modules", "description modules", "descriptionModules"]);
+                if (descModulesRaw && typeof descModulesRaw === "object") {
+                    testEnvRaw = _pickJsonFieldRaw(descModulesRaw, ["Test environment", "test environment", "test_environment", "testEnvironment"]);
+                }
+            }
             if (testEnvRaw == null) return { rvpType: "", aob: "" };
 
             if (typeof testEnvRaw === "object" && !Array.isArray(testEnvRaw)) {
@@ -1336,12 +1342,24 @@
 
             const text = typeof testEnvRaw === "string" ? testEnvRaw : JSON.stringify(testEnvRaw);
             const kv = {};
-            text.split(/\r?\n/).forEach(line => {
-                const m = String(line || "").match(/^\s*([^:=]+?)\s*[:=]\s*(.*?)\s*$/);
-                if (!m) return;
+            const lines = text.split(/\r?\n/);
+            for (let i = 0; i < lines.length; i++) {
+                const line = String(lines[i] || "");
+                const m = line.match(/^\s*([^:=]+?)\s*[:=]\s*(.*?)\s*$/);
+                if (!m) continue;
                 const key = _normalizeJsonFieldKey(m[1]);
-                kv[key] = m[2] || "";
-            });
+                let value = m[2] || "";
+                if (!String(value).trim()) {
+                    for (let j = i + 1; j < lines.length; j++) {
+                        const nextLine = String(lines[j] || "").trim();
+                        if (!nextLine) continue;
+                        if (/[:=]/.test(nextLine) && /^[^:=]{1,40}\s*[:=]/.test(nextLine)) break;
+                        value = nextLine;
+                        break;
+                    }
+                }
+                kv[key] = String(value || "").trim();
+            }
 
             const rvpFromLines = kv["rvptype"] || kv["rvp"] || "";
             const aobFromLines = kv["aob"] || "";
