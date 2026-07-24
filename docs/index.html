@@ -835,6 +835,8 @@
         function renderGlobalJiraPanel() {
             const panel = document.getElementById("jiraGlobalPanel");
             if (!panel) return;
+            panel.innerHTML = "";
+            return;
 
             const f = globalJiraFilters;
             const syncedText = jiraCasesSynced
