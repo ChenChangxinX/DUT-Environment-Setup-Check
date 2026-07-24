@@ -1361,13 +1361,15 @@
                 kv[key] = String(value || "").trim();
             }
 
-            const rvpFromLines = kv["rvptype"] || kv["rvp"] || "";
-            const aobFromLines = kv["aob"] || "";
+            const kvEntries = Object.entries(kv);
+            const rvpFromLines = (kvEntries.find(([k, v]) => (k.includes("rvptype") || k === "rvp") && String(v || "").trim()) || ["", ""])[1];
+            const aobFromLines = (kvEntries.find(([k, v]) => k.includes("aob") && String(v || "").trim()) || ["", ""])[1];
 
             const rvpMatch = text.match(/rvp\s*type\s*[:=]\s*([^\n\r|]+)/i);
             const aobMatch = text.match(/aob\s*[:=]\s*([^\n\r|]+)/i);
+            const rvpTags = Array.from(new Set(Array.from(text.matchAll(/\bRVP\d{2,}\b/gi)).map(m => String(m[0] || "").toUpperCase())));
             return {
-                rvpType: String(rvpFromLines || (rvpMatch ? rvpMatch[1] : "") || "").trim(),
+                rvpType: String(rvpFromLines || (rvpMatch ? rvpMatch[1] : "") || (rvpTags.length > 0 ? rvpTags.join("/") : "") || "").trim(),
                 aob: String(aobFromLines || (aobMatch ? aobMatch[1] : "") || "").trim(),
             };
         }
