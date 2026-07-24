@@ -842,7 +842,6 @@
                 : "Not synced yet";
 
             const selectedNodeText = selectedNodeId ? `Selected DUT: ${selectedNodeId}` : "Selected DUT: (none)";
-            const syncBtnText = jiraSyncInProgress ? "⏳ Syncing..." : "📡 Sync Jira Cases";
             const configDisabled = (!jiraCasesSynced || !selectedNodeId || jiraSyncInProgress) ? "disabled" : "";
 
             panel.innerHTML = `
@@ -875,7 +874,6 @@
                         </div>
                     </div>
                     <div class="jira-filter-actions">
-                        <button class="btn btn-success" onclick="showJiraSyncDialog()" ${jiraSyncInProgress ? "disabled" : ""}>${syncBtnText}</button>
                         <button class="btn btn-primary" onclick="openJiraMatchModal()" ${configDisabled}>⚙️ 配置</button>
                         <span class="jira-sync-meta">${esc(syncedText)}</span>
                         <span class="jira-sync-meta">${esc(selectedNodeText)}</span>
@@ -1215,6 +1213,10 @@
 
         function renderTriggerPanel(triggerType) {
             const content = document.getElementById("detailPanel");
+            const syncBtnText = jiraSyncInProgress ? "⏳ Syncing..." : "📡 Sync Jira Cases";
+            const manualSyncAction = triggerType === "manual"
+                ? `<button class="btn btn-success" onclick="showJiraSyncDialog()" ${jiraSyncInProgress ? "disabled" : ""}>${syncBtnText}</button>`
+                : "";
             
             // Ensure detailPanel is visible
             if (document.getElementById("emptyState")) {
@@ -1235,6 +1237,7 @@
                 </div>
                 <div class="detail-actions">
                     <button class="btn btn-primary" onclick="refreshTriggerPage('${esc(triggerType)}')" style="margin-bottom: 1rem;">🔄 刷新</button>
+                    ${manualSyncAction}
                 </div>
                 <div class="detail-content" id="triggerContent">
                     <div style="padding: 1rem; color: #7f8c8d;">
