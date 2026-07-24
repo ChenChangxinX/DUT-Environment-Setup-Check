@@ -1046,23 +1046,35 @@
             `;
         }
 
-        function _extractCameraKeywords(cameraText) {
-            const low = String(cameraText || "").toLowerCase();
-            const keys = [];
-            if (low.includes("ov13b")) keys.push("ov13b");
-            if (low.includes("og0va1b")) keys.push("og0va1b");
-            if (low.includes("ov08x40")) keys.push("ov08x40");
-            if (low.includes("imx688") || low.includes("imx 688")) keys.push("imx688");
-            return keys;
+        function _detectDutBoardType(node) {
+            const category = String(node?.category || "").toUpperCase();
+            if (category.includes("DC")) return "DC";
+            if (category.includes("GC")) return "GC";
+            if (category.includes("CVS")) return "CVS";
+            if (category.includes("688") || category.includes("S688")) return "S688";
+
+            const nodeId = String(node?.id || "").toUpperCase();
+            if (nodeId.includes("DC")) return "DC";
+            if (nodeId.includes("GC")) return "GC";
+            if (nodeId.includes("CVS")) return "CVS";
+            if (nodeId.includes("688") || nodeId.includes("S688")) return "S688";
+
+            const deviceName = String(node?.device_name || "").toUpperCase();
+            if (deviceName.includes("-DC")) return "DC";
+            if (deviceName.includes("-GC")) return "GC";
+            if (deviceName.includes("-CVS")) return "CVS";
+            if (deviceName.includes("S688") || deviceName.includes("688")) return "S688";
+
+            return "";
         }
 
-        function _filterCasesByDutCamera(cases, cameraText) {
-            const keys = _extractCameraKeywords(cameraText);
-            if (keys.length === 0) return [];
+        function _filterCasesByBoardType(cases, boardType) {
+            const key = String(boardType || "").toUpperCase();
+            if (!key) return cases || [];
             return (cases || []).filter(c => {
-                const testConfig = String(_pickCaseCustomField(c, ["Test Config"]) || "").toLowerCase();
+                const testConfig = String(_pickCaseCustomField(c, ["Test Config"]) || "").toUpperCase();
                 if (!testConfig) return false;
-                return keys.some(k => testConfig.includes(k));
+                return testConfig.includes(key);
             });
         }
 
@@ -1081,13 +1093,14 @@
             const filters = globalJiraFilters;
             const selectedNode = nodeList.find(n => n.id === nodeId) || {};
             const cameraText = selectedNode.camera || "";
+            const boardType = _detectDutBoardType({ ...selectedNode, id: nodeId });
             setGlobal(`Matching Jira cases for ${nodeId}...`);
             try {
                 const payload = await matchJiraCases({ nodeId, ...filters });
-                const filteredCases = _filterCasesByDutCamera(payload.cases || [], cameraText);
+                const filteredCases = _filterCasesByBoardType(payload.cases || [], boardType);
                 const body = `
                     <div style="margin-bottom:0.7rem; color:#2c3e50;">
-                        <strong>Node:</strong> ${esc(nodeId)} &nbsp;&nbsp; <strong>Camera:</strong> ${esc(cameraText || "-")} &nbsp;&nbsp; <strong>Matched:</strong> ${filteredCases.length}
+                        <strong>Node:</strong> ${esc(nodeId)} &nbsp;&nbsp; <strong>Board:</strong> ${esc(boardType || "-")} &nbsp;&nbsp; <strong>Camera:</strong> ${esc(cameraText || "-")} &nbsp;&nbsp; <strong>Matched:</strong> ${filteredCases.length}
                     </div>
                     ${renderMatchCasesTable(filteredCases)}
                 `;
