@@ -1046,6 +1046,26 @@
             `;
         }
 
+        function _extractCameraKeywords(cameraText) {
+            const low = String(cameraText || "").toLowerCase();
+            const keys = [];
+            if (low.includes("ov13b")) keys.push("ov13b");
+            if (low.includes("og0va1b")) keys.push("og0va1b");
+            if (low.includes("ov08x40")) keys.push("ov08x40");
+            if (low.includes("imx688") || low.includes("imx 688")) keys.push("imx688");
+            return keys;
+        }
+
+        function _filterCasesByDutCamera(cases, cameraText) {
+            const keys = _extractCameraKeywords(cameraText);
+            if (keys.length === 0) return [];
+            return (cases || []).filter(c => {
+                const testConfig = String(_pickCaseCustomField(c, ["Test Config"]) || "").toLowerCase();
+                if (!testConfig) return false;
+                return keys.some(k => testConfig.includes(k));
+            });
+        }
+
         async function openJiraMatchModal() {
             if (!jiraCasesSynced) {
                 alert("请先点击 Sync Jira Cases 完成同步");
@@ -1059,17 +1079,20 @@
 
             const nodeId = selectedNodeId;
             const filters = globalJiraFilters;
+            const selectedNode = nodeList.find(n => n.id === nodeId) || {};
+            const cameraText = selectedNode.camera || "";
             setGlobal(`Matching Jira cases for ${nodeId}...`);
             try {
                 const payload = await matchJiraCases({ nodeId, ...filters });
+                const filteredCases = _filterCasesByDutCamera(payload.cases || [], cameraText);
                 const body = `
                     <div style="margin-bottom:0.7rem; color:#2c3e50;">
-                        <strong>Node:</strong> ${esc(nodeId)} &nbsp;&nbsp; <strong>Matched:</strong> ${payload.total || 0}
+                        <strong>Node:</strong> ${esc(nodeId)} &nbsp;&nbsp; <strong>Camera:</strong> ${esc(cameraText || "-")} &nbsp;&nbsp; <strong>Matched:</strong> ${filteredCases.length}
                     </div>
-                    ${renderMatchCasesTable(payload.cases || [])}
+                    ${renderMatchCasesTable(filteredCases)}
                 `;
                 openModal(`Matched Cases - ${nodeId}`, body);
-                setGlobal(`Matched ${payload.total || 0} Jira cases for ${nodeId}`);
+                setGlobal(`Matched ${filteredCases.length} Jira cases for ${nodeId}`);
             } catch (e) {
                 setGlobal(`Match failed: ${e.message}`);
                 alert(`Match failed: ${e.message}`);
