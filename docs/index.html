@@ -1368,8 +1368,15 @@
             const rvpMatch = text.match(/rvp\s*type\s*[:=]\s*([^\n\r|]+)/i);
             const aobMatch = text.match(/aob\s*[:=]\s*([^\n\r|]+)/i);
             const rvpTags = Array.from(new Set(Array.from(text.matchAll(/\bRVP\d{2,}\b/gi)).map(m => String(m[0] || "").toUpperCase())));
+            const rvpFromLinesTags = Array.from(new Set(Array.from(String(rvpFromLines || "").matchAll(/\bRVP\d{2,}\b/gi)).map(m => String(m[0] || "").toUpperCase())));
             return {
-                rvpType: String(rvpFromLines || (rvpMatch ? rvpMatch[1] : "") || (rvpTags.length > 0 ? rvpTags.join("/") : "") || "").trim(),
+                rvpType: String(
+                    (rvpFromLinesTags.length > 0 ? rvpFromLinesTags.join("/") : "")
+                    || (rvpTags.length > 0 ? rvpTags.join("/") : "")
+                    || (rvpMatch ? rvpMatch[1] : "")
+                    || rvpFromLines
+                    || ""
+                ).trim(),
                 aob: String(aobFromLines || (aobMatch ? aobMatch[1] : "") || "").trim(),
             };
         }
