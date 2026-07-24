@@ -1010,6 +1010,7 @@
                 const lightEquipment = _pickCaseCustomField(c, ["Light Equipment"]);
                 const testChart = _pickCaseCustomField(c, ["Test Chart"]);
                 const testScene = _pickCaseCustomField(c, ["Test Scene"]);
+                const testConfig = _pickCaseCustomField(c, ["Test Config"]);
                 const parameters = _pickCaseCustomField(c, ["Parameters"]);
                 return `
                     <tr>
@@ -1019,6 +1020,7 @@
                         <td>${esc(lightEquipment)}</td>
                         <td>${esc(testChart)}</td>
                         <td>${esc(testScene)}</td>
+                        <td>${esc(testConfig)}</td>
                         <td>${esc(parameters)}</td>
                     </tr>
                 `;
@@ -1034,6 +1036,7 @@
                                 <th>Light Equipment</th>
                                 <th>Test Chart</th>
                                 <th>Test Scene</th>
+                                <th>Test Config</th>
                                 <th>Parameters</th>
                             </tr>
                         </thead>
