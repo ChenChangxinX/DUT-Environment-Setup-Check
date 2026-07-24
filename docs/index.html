@@ -1374,10 +1374,14 @@
             const rvpFromLines = (kvEntries.find(([k, v]) => (k.includes("rvptype") || k === "rvp") && String(v || "").trim()) || ["", ""])[1];
             const aobFromLines = (kvEntries.find(([k, v]) => k.includes("aob") && String(v || "").trim()) || ["", ""])[1];
 
+            const aobBlockMatch = text.match(/(?:^|\n)\s*aob\s*[:=]\s*([\s\S]*?)(?=\n\s*(?:camera\s*driver\s*path|driver\s*version|soc\s*tuningkit\s*version|qdf|ifwi|rvp\s*os|reproduce\s*steps|manual\s*steps|expected\s*result|actual\s*result|reference\s*cases|logs\/?attachments)\s*[:=]|\n\s*\[[^\]]+\]|$)/i);
+            const aobFromBlock = aobBlockMatch
+                ? String(aobBlockMatch[1] || "").replace(/\r?\n+/g, " ").replace(/\s{2,}/g, " ").trim()
+                : "";
             const aobMatch = text.match(/aob\s*[:=]\s*([^\n\r|]+)/i);
             return {
                 rvpType: String(rvpFromLines || "").trim(),
-                aob: String(aobFromLines || (aobMatch ? aobMatch[1] : "") || "").trim(),
+                aob: String(aobFromBlock || aobFromLines || (aobMatch ? aobMatch[1] : "") || "").trim(),
             };
         }
 
