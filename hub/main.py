@@ -21,6 +21,7 @@ app = FastAPI(title="Hub Aggregator")
 # ----------------------------
 BASE_DIR = Path(__file__).parent
 NODES_PATH = Path(__file__).with_name("nodes.json")
+TEST_ENV_INFO_PATH = BASE_DIR / "test_env_info.ini"
 
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "86400"))  # 24h
 LOCK_TTL_SECONDS = int(os.getenv("LOCK_TTL_SECONDS", "900"))      # 15min
@@ -46,6 +47,13 @@ JIRA_EXCLUDED_FOLDERS = {
     "/fpga_nit",
     "/nvl_cit_nit",
     "/pit-lite",
+}
+
+FIXED_FILTER_SECTION_MAP = {
+    "specific dut": "specificDut",
+    "light equipment": "lightEquipment",
+    "test chart": "testChart",
+    "test scene": "testScene",
 }
 
 # ----------------------------
@@ -156,11 +164,8 @@ def _pick_folder_value(case_obj: Dict[str, Any]) -> str:
 
 
 def _extract_case_filter_fields(case_obj: Dict[str, Any]) -> Dict[str, str]:
-    specific_dut = _pick_custom_field(case_obj, "Specific DUT")
-    if not specific_dut:
-        specific_dut = _pick_custom_field(case_obj, "DUT")
     return {
-        "specificDut": specific_dut,
+        "specificDut": _pick_custom_field(case_obj, "Specific DUT"),
         "lightEquipment": _pick_custom_field(case_obj, "Light Equipment"),
         "testChart": _pick_custom_field(case_obj, "Test Chart"),
         "testScene": _pick_custom_field(case_obj, "Test Scene"),
@@ -364,6 +369,67 @@ def _build_filter_options(cases: List[Dict[str, Any]]) -> Dict[str, List[str]]:
             if clean:
                 option_sets[key].add(clean)
     return {k: sorted(v) for k, v in option_sets.items()}
+
+
+def _load_fixed_filter_options() -> Dict[str, List[str]]:
+    fixed: Dict[str, List[str]] = {
+        "specificDut": [],
+        "lightEquipment": [],
+        "testChart": [],
+        "testScene": [],
+    }
+    if not TEST_ENV_INFO_PATH.exists():
+        return fixed
+
+    try:
+        lines = TEST_ENV_INFO_PATH.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except Exception:
+        return fixed
+
+    current_key: Optional[str] = None
+    for raw in lines:
+        line = str(raw or "").strip()
+        if not line:
+            continue
+        normalized = " ".join(line.split()).lower()
+        section_key = FIXED_FILTER_SECTION_MAP.get(normalized)
+        if section_key:
+            current_key = section_key
+            continue
+
+        if current_key:
+            fixed[current_key].append(" ".join(line.split()))
+
+    for key, values in fixed.items():
+        seen = set()
+        deduped: List[str] = []
+        for v in values:
+            nv = _normalize_text(v)
+            if not nv or nv in seen:
+                continue
+            seen.add(nv)
+            deduped.append(v)
+        fixed[key] = deduped
+
+    return fixed
+
+
+def _merge_filter_options(dynamic: Dict[str, List[str]], fixed: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    merged: Dict[str, List[str]] = {}
+    for key in ("specificDut", "lightEquipment", "testChart", "testScene"):
+        fixed_values = list(fixed.get(key) or [])
+        dynamic_values = list(dynamic.get(key) or [])
+        out: List[str] = []
+        seen = set()
+        for v in fixed_values + dynamic_values:
+            clean = str(v or "").strip()
+            norm = _normalize_text(clean)
+            if not norm or norm in seen:
+                continue
+            seen.add(norm)
+            out.append(clean)
+        merged[key] = out
+    return merged
 
 
 def _is_filter_match(case_value: str, filter_value: str) -> bool:
@@ -631,7 +697,7 @@ async def jira_sync_cases(request: Request):
             raise HTTPException(status_code=502, detail=f"Jira sync failed: {e}")
 
         filtered_cases = [x for x in all_cases if _is_case_target(x)]
-        options = _build_filter_options(filtered_cases)
+        options = _merge_filter_options(_build_filter_options(filtered_cases), _load_fixed_filter_options())
         duration_sec = round(time.time() - start, 3)
 
         cache_set(
@@ -670,30 +736,34 @@ async def jira_sync_cases(request: Request):
 
 @app.get("/api/jira/sync-cases")
 async def jira_get_synced_cases_meta():
+    fixed_options = _load_fixed_filter_options()
     entry = cache_get(JIRA_CASES_CACHE_KEY)
     if not entry:
         return {
             "ok": True,
             "synced": False,
             "meta": {},
-            "options": {
-                "specificDut": [],
-                "lightEquipment": [],
-                "testChart": [],
-                "testScene": [],
-            },
+            "options": fixed_options,
             "count": 0,
         }
 
     data = entry.get("data") or {}
     cases = data.get("cases") or []
-    options = data.get("options") or _build_filter_options(cases)
+    options = _merge_filter_options(data.get("options") or _build_filter_options(cases), fixed_options)
     return {
         "ok": True,
         "synced": True,
         "meta": entry.get("meta") or {},
         "options": options,
         "count": len(cases),
+    }
+
+
+@app.get("/api/jira/fixed-filter-options")
+async def jira_get_fixed_filter_options():
+    return {
+        "ok": True,
+        "options": _load_fixed_filter_options(),
     }
 
 

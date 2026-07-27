@@ -676,9 +676,17 @@
         const serverMeta = {};
         let nodeList = [];
         let selectedNodeId = null;
+        let selectedTriggerType = null;
+        let manualJsonTableState = { rows: null, fileName: "" };
         let jiraCasesSynced = false;
         let jiraSyncMeta = {};
         let jiraCaseOptions = {
+            specificDut: [],
+            lightEquipment: [],
+            testChart: [],
+            testScene: [],
+        };
+        let fixedJiraCaseOptions = {
             specificDut: [],
             lightEquipment: [],
             testChart: [],
@@ -788,6 +796,12 @@
             return await r.json();
         }
 
+        async function getFixedJiraFilterOptions() {
+            const r = await fetch(apiUrl("/api/jira/fixed-filter-options"));
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return await r.json();
+        }
+
         async function syncJiraCases(payload) {
             const r = await fetch(apiUrl("/api/jira/sync-cases"), {
                 method: "POST",
@@ -818,6 +832,29 @@
             globalJiraFilters[key] = value;
         }
 
+        function _normalizeOptionValue(v) {
+            return String(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+        }
+
+        function _mergeJiraCaseOptions(baseOptions, extraOptions) {
+            const keys = ["specificDut", "lightEquipment", "testChart", "testScene"];
+            const merged = {};
+            keys.forEach(k => {
+                const seen = new Set();
+                const out = [];
+                const src = [...(baseOptions?.[k] || []), ...(extraOptions?.[k] || [])];
+                src.forEach(v => {
+                    const clean = String(v ?? "").trim();
+                    const norm = _normalizeOptionValue(clean);
+                    if (!norm || seen.has(norm)) return;
+                    seen.add(norm);
+                    out.push(clean);
+                });
+                merged[k] = out;
+            });
+            return merged;
+        }
+
         function buildJiraSelectOptions(values, selected) {
             const rows = [
                 `<option value="__ANY__" ${selected === "__ANY__" ? "selected" : ""}>Any</option>`,
@@ -834,6 +871,10 @@
         function renderGlobalJiraPanel() {
             const panel = document.getElementById("jiraGlobalPanel");
             if (!panel) return;
+            if (selectedTriggerType === "manual") {
+                panel.innerHTML = "";
+                return;
+            }
 
             const f = globalJiraFilters;
             const syncedText = jiraCasesSynced
@@ -841,7 +882,6 @@
                 : "Not synced yet";
 
             const selectedNodeText = selectedNodeId ? `Selected DUT: ${selectedNodeId}` : "Selected DUT: (none)";
-            const syncBtnText = jiraSyncInProgress ? "⏳ Syncing..." : "📡 Sync Jira Cases";
             const configDisabled = (!jiraCasesSynced || !selectedNodeId || jiraSyncInProgress) ? "disabled" : "";
 
             panel.innerHTML = `
@@ -874,7 +914,6 @@
                         </div>
                     </div>
                     <div class="jira-filter-actions">
-                        <button class="btn btn-success" onclick="showJiraSyncDialog()" ${jiraSyncInProgress ? "disabled" : ""}>${syncBtnText}</button>
                         <button class="btn btn-primary" onclick="openJiraMatchModal()" ${configDisabled}>⚙️ 配置</button>
                         <span class="jira-sync-meta">${esc(syncedText)}</span>
                         <span class="jira-sync-meta">${esc(selectedNodeText)}</span>
@@ -985,7 +1024,7 @@
                 });
                 jiraCasesSynced = true;
                 jiraSyncMeta = payload.meta || {};
-                jiraCaseOptions = payload.options || jiraCaseOptions;
+                jiraCaseOptions = _mergeJiraCaseOptions(fixedJiraCaseOptions, payload.options || {});
                 closeModal();
                 setGlobal(`Jira sync completed. matched=${jiraSyncMeta.targetMatched || 0}`);
             } catch (e) {
@@ -1006,6 +1045,7 @@
                 const lightEquipment = _pickCaseCustomField(c, ["Light Equipment"]);
                 const testChart = _pickCaseCustomField(c, ["Test Chart"]);
                 const testScene = _pickCaseCustomField(c, ["Test Scene"]);
+                const testConfig = _pickCaseCustomField(c, ["Test Config"]);
                 const parameters = _pickCaseCustomField(c, ["Parameters"]);
                 return `
                     <tr>
@@ -1015,6 +1055,7 @@
                         <td>${esc(lightEquipment)}</td>
                         <td>${esc(testChart)}</td>
                         <td>${esc(testScene)}</td>
+                        <td>${esc(testConfig)}</td>
                         <td>${esc(parameters)}</td>
                     </tr>
                 `;
@@ -1030,6 +1071,7 @@
                                 <th>Light Equipment</th>
                                 <th>Test Chart</th>
                                 <th>Test Scene</th>
+                                <th>Test Config</th>
                                 <th>Parameters</th>
                             </tr>
                         </thead>
@@ -1037,6 +1079,42 @@
                     </table>
                 </div>
             `;
+        }
+
+        function _detectDutBoardType(node) {
+            const category = String(node?.category || "").toUpperCase();
+            if (category.includes("DC")) return "DC";
+            if (category.includes("GC")) return "GC";
+            if (category.includes("CVS")) return "CVS";
+            if (category.includes("688") || category.includes("S688")) return "S688";
+
+            const nodeId = String(node?.id || "").toUpperCase();
+            if (nodeId.includes("DC")) return "DC";
+            if (nodeId.includes("GC")) return "GC";
+            if (nodeId.includes("CVS")) return "CVS";
+            if (nodeId.includes("688") || nodeId.includes("S688")) return "S688";
+
+            const deviceName = String(node?.device_name || "").toUpperCase();
+            if (deviceName.includes("-DC")) return "DC";
+            if (deviceName.includes("-GC")) return "GC";
+            if (deviceName.includes("-CVS")) return "CVS";
+            if (deviceName.includes("S688") || deviceName.includes("688")) return "S688";
+
+            return "";
+        }
+
+        function _filterCasesByBoardType(cases, boardType) {
+            const key = String(boardType || "").toUpperCase();
+            if (!key) return cases || [];
+            return (cases || []).filter(c => {
+                const testConfig = String(_pickCaseCustomField(c, ["Test Config"]) || "").toUpperCase();
+                if (!testConfig) return false;
+                if (key === "GC") return testConfig.includes("GC");
+                if (key === "DC") return testConfig.includes("NVL_UPH_DC2");
+                if (key === "CVS") return testConfig.includes("CVS");
+                if (key === "S688") return testConfig.includes("NVL_HX_DC2");
+                return false;
+            });
         }
 
         async function openJiraMatchModal() {
@@ -1052,17 +1130,21 @@
 
             const nodeId = selectedNodeId;
             const filters = globalJiraFilters;
+            const selectedNode = nodeList.find(n => n.id === nodeId) || {};
+            const cameraText = selectedNode.camera || "";
+            const boardType = _detectDutBoardType({ ...selectedNode, id: nodeId });
             setGlobal(`Matching Jira cases for ${nodeId}...`);
             try {
                 const payload = await matchJiraCases({ nodeId, ...filters });
+                const filteredCases = _filterCasesByBoardType(payload.cases || [], boardType);
                 const body = `
                     <div style="margin-bottom:0.7rem; color:#2c3e50;">
-                        <strong>Node:</strong> ${esc(nodeId)} &nbsp;&nbsp; <strong>Matched:</strong> ${payload.total || 0}
+                        <strong>Node:</strong> ${esc(nodeId)} &nbsp;&nbsp; <strong>Board:</strong> ${esc(boardType || "-")} &nbsp;&nbsp; <strong>Camera:</strong> ${esc(cameraText || "-")} &nbsp;&nbsp; <strong>Matched:</strong> ${filteredCases.length}
                     </div>
-                    ${renderMatchCasesTable(payload.cases || [])}
+                    ${renderMatchCasesTable(filteredCases)}
                 `;
                 openModal(`Matched Cases - ${nodeId}`, body);
-                setGlobal(`Matched ${payload.total || 0} Jira cases for ${nodeId}`);
+                setGlobal(`Matched ${filteredCases.length} Jira cases for ${nodeId}`);
             } catch (e) {
                 setGlobal(`Match failed: ${e.message}`);
                 alert(`Match failed: ${e.message}`);
@@ -1171,6 +1253,7 @@
         }
 
         async function selectNode(nodeId) {
+            selectedTriggerType = null;
             selectedNodeId = nodeId;
             renderGlobalJiraPanel();
             setGlobal(`Loading ${nodeId}...`);
@@ -1203,17 +1286,27 @@
         }
 
         function selectTrigger(triggerType) {
+            selectedTriggerType = triggerType;
             setGlobal(`Trigger: ${triggerType}`);
 
             document.querySelectorAll(".node-item").forEach(el => {
                 el.classList.toggle("active", el.dataset.triggerType === triggerType);
             });
 
+            renderGlobalJiraPanel();
             renderTriggerPanel(triggerType);
         }
 
         function renderTriggerPanel(triggerType) {
             const content = document.getElementById("detailPanel");
+            const syncBtnText = jiraSyncInProgress ? "⏳ Syncing..." : "📡 Sync Jira Cases";
+            const isManual = triggerType === "manual";
+            const actionButtons = isManual
+                ? `
+                    <button class="btn btn-success" onclick="showJiraSyncDialog()" ${jiraSyncInProgress ? "disabled" : ""}>${syncBtnText}</button>
+                    <button class="btn btn-primary" onclick="openManualJsonFilePicker()">📄 解析 JSON 文件</button>
+                `
+                : `<button class="btn btn-primary" onclick="refreshTriggerPage('${esc(triggerType)}')" style="margin-bottom: 1rem;">🔄 刷新</button>`;
             
             // Ensure detailPanel is visible
             if (document.getElementById("emptyState")) {
@@ -1233,14 +1326,223 @@
                     <h2>⚡ Trigger: ${esc(triggerType)}</h2>
                 </div>
                 <div class="detail-actions">
-                    <button class="btn btn-primary" onclick="refreshTriggerPage('${esc(triggerType)}')" style="margin-bottom: 1rem;">🔄 刷新</button>
+                    ${actionButtons}
                 </div>
+                <input id="manualJsonInput" type="file" accept="application/json,.json" style="display:none;" onchange="handleManualJsonFile(event)">
                 <div class="detail-content" id="triggerContent">
                     <div style="padding: 1rem; color: #7f8c8d;">
                         ${triggerType === 'manual' ? 'Manual Trigger 页面' : 'Auto Trigger 页面'}
                     </div>
                 </div>
             `;
+
+            if (isManual && manualJsonTableState.rows) {
+                _renderManualJsonTable(manualJsonTableState.rows, manualJsonTableState.fileName);
+            }
+        }
+
+        function _normalizeJsonFieldKey(key) {
+            return String(key || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        }
+
+        function _pickJsonFieldRaw(row, aliases) {
+            if (!row || typeof row !== "object") return undefined;
+            const keys = Object.keys(row);
+            const normMap = {};
+            keys.forEach(k => { normMap[_normalizeJsonFieldKey(k)] = k; });
+            for (const alias of aliases) {
+                const hit = normMap[_normalizeJsonFieldKey(alias)];
+                if (hit) return row[hit];
+            }
+            return undefined;
+        }
+
+        function _pickJsonFieldValue(row, aliases) {
+            const v = _pickJsonFieldRaw(row, aliases);
+            if (v == null) return "";
+            if (Array.isArray(v)) return v.map(x => (typeof x === "object" ? JSON.stringify(x) : String(x))).join("; ");
+            if (typeof v === "object") return JSON.stringify(v);
+            return String(v);
+        }
+
+        function _extractTestEnvironmentMeta(row) {
+            let testEnvRaw = _pickJsonFieldRaw(row, ["Test environment", "test environment", "test_environment", "testEnvironment"]);
+            if (testEnvRaw == null) {
+                const descModulesRaw = _pickJsonFieldRaw(row, ["description_modules", "description modules", "descriptionModules"]);
+                if (descModulesRaw && typeof descModulesRaw === "object") {
+                    testEnvRaw = _pickJsonFieldRaw(descModulesRaw, ["Test environment", "test environment", "test_environment", "testEnvironment"]);
+                }
+            }
+            if (testEnvRaw == null) return { rvpType: "", aob: "" };
+
+            if (typeof testEnvRaw === "object" && !Array.isArray(testEnvRaw)) {
+                const rvpFromObj = _pickJsonFieldValue(testEnvRaw, ["RVP type", "rvp type", "rvp_type", "rvpType", "RVP"]);
+                const aobFromObj = _pickJsonFieldValue(testEnvRaw, ["AOB", "aob"]);
+                if (rvpFromObj || aobFromObj) {
+                    return { rvpType: rvpFromObj || "", aob: aobFromObj || "" };
+                }
+            }
+
+            const text = typeof testEnvRaw === "string" ? testEnvRaw : JSON.stringify(testEnvRaw);
+            const kv = {};
+            const lines = text.split(/\r?\n/);
+            for (let i = 0; i < lines.length; i++) {
+                const line = String(lines[i] || "");
+                const m = line.match(/^\s*([^:=]+?)\s*[:=]\s*(.*?)\s*$/);
+                if (!m) continue;
+                const key = _normalizeJsonFieldKey(m[1]);
+                let value = m[2] || "";
+                if (!String(value).trim()) {
+                    for (let j = i + 1; j < lines.length; j++) {
+                        const nextLine = String(lines[j] || "").trim();
+                        if (!nextLine) continue;
+                        if (/[:=]/.test(nextLine) && /^[^:=]{1,40}\s*[:=]/.test(nextLine)) break;
+                        value = nextLine;
+                        break;
+                    }
+                }
+                kv[key] = String(value || "").trim();
+            }
+
+            const kvEntries = Object.entries(kv);
+            const rvpFromLines = (kvEntries.find(([k, v]) => (k.includes("rvptype") || k === "rvp") && String(v || "").trim()) || ["", ""])[1];
+            const aobFromLines = (kvEntries.find(([k, v]) => k.includes("aob") && String(v || "").trim()) || ["", ""])[1];
+
+            const aobBlockMatch = text.match(/(?:^|\n)\s*aob\s*[:=]\s*([\s\S]*?)(?=\n\s*(?:camera\s*driver\s*path|driver\s*version|soc\s*tuningkit\s*version|qdf|ifwi|rvp\s*os|reproduce\s*steps|manual\s*steps|expected\s*result|actual\s*result|reference\s*cases|logs\/?attachments)\s*[:=]|\n\s*\[[^\]]+\]|$)/i);
+            const aobFromBlock = aobBlockMatch
+                ? String(aobBlockMatch[1] || "").replace(/\r?\n+/g, " ").replace(/\s{2,}/g, " ").trim()
+                : "";
+            const aobMatch = text.match(/aob\s*[:=]\s*([^\n\r|]+)/i);
+            return {
+                rvpType: String(rvpFromLines || "").trim(),
+                aob: String(aobFromBlock || aobFromLines || (aobMatch ? aobMatch[1] : "") || "").trim(),
+            };
+        }
+
+        function _extractJsonRows(data) {
+            if (Array.isArray(data)) return data.filter(x => x && typeof x === "object");
+            if (!data || typeof data !== "object") return [];
+            const candidates = [data.cases, data.items, data.results, data.values];
+            for (const c of candidates) {
+                if (Array.isArray(c)) return c.filter(x => x && typeof x === "object");
+            }
+            return [];
+        }
+
+        function _deriveManualBoardType(row, envMeta) {
+            const title = String(_pickJsonFieldValue(row, ["title", "name", "summary"]) || "").toUpperCase();
+            const titleMatches = Array.from(new Set(Array.from(title.matchAll(/\b(DC2|DC1|GC)\b/g)).map(m => m[1])));
+            if (titleMatches.length > 0) return titleMatches.join("/");
+
+            const aobText = String(envMeta?.aob || _pickJsonFieldValue(row, ["AOB", "aob"]) || "").toUpperCase();
+            if (!aobText) return "";
+
+            const hasOv13b = aobText.includes("OV13B");
+            const hasOg0va1b = aobText.includes("OG0VA1B");
+            const hasOv08x40 = aobText.includes("OV08X40");
+            const hasImx688 = aobText.includes("IMX688");
+
+            if (hasOv13b && hasOg0va1b && hasOv08x40) return "GC";
+            if (hasOv13b && hasImx688) return "DC2";
+            if (hasOg0va1b && hasOv08x40) return "DC1";
+            if (hasImx688) return "DC2";
+            return "";
+        }
+
+        function _extractManualAobSensors(row, envMeta) {
+            const aobText = String(envMeta?.aob || _pickJsonFieldValue(row, ["AOB", "aob"]) || "").toUpperCase();
+            if (!aobText) return "";
+
+            const sensors = [];
+            if (aobText.includes("OV13B10") || aobText.includes("OV13B")) sensors.push("OV13B10");
+            if (aobText.includes("OG0VA1B")) sensors.push("OG0VA1B");
+            if (aobText.includes("OV08X40")) sensors.push("OV08X40");
+            if (aobText.includes("IMX688")) sensors.push("IMX688");
+            return Array.from(new Set(sensors)).join(" ");
+        }
+
+        function _renderManualJsonTable(rows, fileName) {
+            const content = document.getElementById("triggerContent");
+            if (!content) return;
+            manualJsonTableState = { rows: rows || [], fileName: fileName || "" };
+            if (!rows || rows.length === 0) {
+                content.innerHTML = `<div style="padding:1rem;color:#7f8c8d;">文件 ${esc(fileName || "-")} 未找到可展示的记录。</div>`;
+                return;
+            }
+
+            const tableRows = rows.map(r => {
+                const hsdId = _pickJsonFieldValue(r, ["id", "hsd id", "hsd_id", "hsdId"]);
+                const updatedDate = _pickJsonFieldValue(r, ["updated_date", "updated date", "updatedDate"]);
+                const submittedBy = _pickJsonFieldValue(r, ["submitted_by", "submitted by", "submittedBy"]);
+                const status = _pickJsonFieldValue(r, ["status"]);
+                const envMeta = _extractTestEnvironmentMeta(r);
+                const rvpType = _deriveManualBoardType(r, envMeta);
+                const aob = _extractManualAobSensors(r, envMeta);
+                const referenceCasesItems = _pickJsonFieldValue(r, ["reference_cases_items", "reference cases items", "referenceCasesItems"]);
+                return `
+                    <tr>
+                        <td>${esc(hsdId)}</td>
+                        <td>${esc(updatedDate)}</td>
+                        <td>${esc(submittedBy)}</td>
+                        <td>${esc(status)}</td>
+                        <td>${esc(rvpType)}</td>
+                        <td>${esc(aob)}</td>
+                        <td>${esc(referenceCasesItems)}</td>
+                    </tr>
+                `;
+            }).join("");
+
+            content.innerHTML = `
+                <div style="margin-bottom:0.7rem; color:#2c3e50;">
+                    <strong>JSON File:</strong> ${esc(fileName || "-")} &nbsp;&nbsp; <strong>Rows:</strong> ${rows.length}
+                </div>
+                <div class="jira-cases-table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>hsd id</th>
+                                <th>updated_date</th>
+                                <th>submitted_by</th>
+                                <th>status</th>
+                                <th>RVP type</th>
+                                <th>AOB</th>
+                                <th>reference_cases_items</th>
+                            </tr>
+                        </thead>
+                        <tbody>${tableRows}</tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function openManualJsonFilePicker() {
+            const input = document.getElementById("manualJsonInput");
+            if (!input) return;
+            input.value = "";
+            input.click();
+        }
+
+        function handleManualJsonFile(event) {
+            const file = event?.target?.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const text = String(reader.result || "");
+                    const data = JSON.parse(text);
+                    const rows = _extractJsonRows(data);
+                    _renderManualJsonTable(rows, file.name);
+                    setGlobal(`JSON parsed: ${file.name} (${rows.length} rows)`);
+                } catch (e) {
+                    setGlobal(`JSON parse failed: ${e.message}`);
+                    alert(`JSON parse failed: ${e.message}`);
+                }
+            };
+            reader.onerror = () => {
+                setGlobal("JSON read failed");
+                alert("读取 JSON 文件失败");
+            };
+            reader.readAsText(file, "utf-8");
         }
 
         function refreshTriggerPage(triggerType) {
@@ -1631,6 +1933,15 @@
             try {
                 setGlobal("Loading nodes... API Base=" + (apiBase || "auto (localhost:8001)"));
                 nodeList = await loadNodes();
+
+                try {
+                    const fixedOptionsPayload = await getFixedJiraFilterOptions();
+                    fixedJiraCaseOptions = fixedOptionsPayload.options || fixedJiraCaseOptions;
+                    jiraCaseOptions = _mergeJiraCaseOptions(fixedJiraCaseOptions, jiraCaseOptions);
+                } catch (e) {
+                    console.log("Fixed Jira filter options not ready: " + e.message);
+                }
+
                 renderSidebar(nodeList);
                 renderGlobalJiraPanel();
 
@@ -1638,7 +1949,7 @@
                     const jiraMetaPayload = await getJiraSyncMeta();
                     jiraCasesSynced = !!jiraMetaPayload.synced;
                     jiraSyncMeta = jiraMetaPayload.meta || {};
-                    jiraCaseOptions = jiraMetaPayload.options || jiraCaseOptions;
+                    jiraCaseOptions = _mergeJiraCaseOptions(fixedJiraCaseOptions, jiraMetaPayload.options || {});
                     renderGlobalJiraPanel();
                 } catch (e) {
                     console.log("Jira sync meta not ready: " + e.message);

@@ -687,6 +687,12 @@
             testChart: [],
             testScene: [],
         };
+        let fixedJiraCaseOptions = {
+            specificDut: [],
+            lightEquipment: [],
+            testChart: [],
+            testScene: [],
+        };
         const globalJiraFilters = {
             specificDut: "__ANY__",
             lightEquipment: "__ANY__",
@@ -791,6 +797,12 @@
             return await r.json();
         }
 
+        async function getFixedJiraFilterOptions() {
+            const r = await fetch(apiUrl("/api/jira/fixed-filter-options"));
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return await r.json();
+        }
+
         async function syncJiraCases(payload) {
             const r = await fetch(apiUrl("/api/jira/sync-cases"), {
                 method: "POST",
@@ -819,6 +831,29 @@
 
         function updateGlobalJiraFilter(key, value) {
             globalJiraFilters[key] = value;
+        }
+
+        function _normalizeOptionValue(v) {
+            return String(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+        }
+
+        function _mergeJiraCaseOptions(baseOptions, extraOptions) {
+            const keys = ["specificDut", "lightEquipment", "testChart", "testScene"];
+            const merged = {};
+            keys.forEach(k => {
+                const seen = new Set();
+                const out = [];
+                const src = [...(baseOptions?.[k] || []), ...(extraOptions?.[k] || [])];
+                src.forEach(v => {
+                    const clean = String(v ?? "").trim();
+                    const norm = _normalizeOptionValue(clean);
+                    if (!norm || seen.has(norm)) return;
+                    seen.add(norm);
+                    out.push(clean);
+                });
+                merged[k] = out;
+            });
+            return merged;
         }
 
         function buildJiraSelectOptions(values, selected) {
@@ -990,7 +1025,7 @@
                 });
                 jiraCasesSynced = true;
                 jiraSyncMeta = payload.meta || {};
-                jiraCaseOptions = payload.options || jiraCaseOptions;
+                jiraCaseOptions = _mergeJiraCaseOptions(fixedJiraCaseOptions, payload.options || {});
                 closeModal();
                 setGlobal(`Jira sync completed. matched=${jiraSyncMeta.targetMatched || 0}`);
             } catch (e) {
@@ -1899,6 +1934,15 @@
             try {
                 setGlobal("Loading nodes... API Base=" + (apiBase || "auto (localhost:8001)"));
                 nodeList = await loadNodes();
+
+                try {
+                    const fixedOptionsPayload = await getFixedJiraFilterOptions();
+                    fixedJiraCaseOptions = fixedOptionsPayload.options || fixedJiraCaseOptions;
+                    jiraCaseOptions = _mergeJiraCaseOptions(fixedJiraCaseOptions, jiraCaseOptions);
+                } catch (e) {
+                    console.log("Fixed Jira filter options not ready: " + e.message);
+                }
+
                 renderSidebar(nodeList);
                 renderGlobalJiraPanel();
 
@@ -1906,7 +1950,7 @@
                     const jiraMetaPayload = await getJiraSyncMeta();
                     jiraCasesSynced = !!jiraMetaPayload.synced;
                     jiraSyncMeta = jiraMetaPayload.meta || {};
-                    jiraCaseOptions = jiraMetaPayload.options || jiraCaseOptions;
+                    jiraCaseOptions = _mergeJiraCaseOptions(fixedJiraCaseOptions, jiraMetaPayload.options || {});
                     renderGlobalJiraPanel();
                 } catch (e) {
                     console.log("Jira sync meta not ready: " + e.message);
