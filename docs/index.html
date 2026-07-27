@@ -1645,10 +1645,20 @@
             return hints;
         }
 
+        function _normalizeRvpValue(value) {
+            const raw = String(value || "").trim().toUpperCase();
+            if (!raw) return "";
+
+            const m = raw.match(/RVP\s*0*([0-9]+)/);
+            if (m && m[1]) return `RVP${parseInt(m[1], 10)}`;
+
+            return raw.replace(/\s+/g, "");
+        }
+
         function _matchManualRowDuts(rowMeta) {
             const rvpText = String(rowMeta?.rvpType || "");
             const referenceText = String(rowMeta?.referenceCasesItems || "");
-            const envRvp = String(rowMeta?.envRvpType || "").trim().toUpperCase();
+            const envRvp = _normalizeRvpValue(rowMeta?.envRvpType || "");
             const aobSensors = _splitManualAobSensors(rowMeta?.aob || "");
 
             const boardHints = new Set([
@@ -1682,7 +1692,7 @@
                 if (!boardOk) return false;
 
                 if (envRvp) {
-                    const nodeRvp = String(n?.rvp_type || "").trim().toUpperCase();
+                    const nodeRvp = _normalizeRvpValue(n?.rvp_type || "");
                     return nodeRvp === envRvp;
                 }
                 return true;
