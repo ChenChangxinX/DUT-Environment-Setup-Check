@@ -682,6 +682,8 @@
         let selectedNodeId = null;
         let selectedTriggerType = null;
         let manualJsonTableState = { rows: null, fileName: "", matches: {} };
+        let manualJsonAutoRestoreInFlight = false;
+        let manualJsonAutoRestoreDone = false;
         let jiraCasesSynced = false;
         let jiraSyncMeta = {};
         const DEFAULT_FIXED_JIRA_CASE_OPTIONS = {
@@ -916,6 +918,15 @@
                     rawText: String(rawText || ""),
                 }),
             });
+            if (!r.ok) {
+                const err = await r.json().catch(() => ({ detail: `HTTP ${r.status}` }));
+                throw new Error(err.detail || `HTTP ${r.status}`);
+            }
+            return await r.json();
+        }
+
+        async function getLatestManualJsonUpload(userId) {
+            const r = await fetch(apiUrl(`/api/manual-json/uploads/latest?userId=${encodeURIComponent(userId || "default")}`));
             if (!r.ok) {
                 const err = await r.json().catch(() => ({ detail: `HTTP ${r.status}` }));
                 throw new Error(err.detail || `HTTP ${r.status}`);
@@ -1501,6 +1512,36 @@
 
             if (isManual && manualJsonTableState.rows) {
                 _renderManualJsonTable(manualJsonTableState.rows, manualJsonTableState.fileName);
+            } else if (isManual) {
+                void restoreManualJsonAfterReload();
+            }
+        }
+
+        async function restoreManualJsonAfterReload() {
+            if (manualJsonAutoRestoreInFlight || manualJsonAutoRestoreDone) return;
+            if (manualJsonTableState.rows && manualJsonTableState.rows.length > 0) return;
+
+            manualJsonAutoRestoreInFlight = true;
+            try {
+                const payload = await getLatestManualJsonUpload(currentUserId);
+                const item = payload?.item;
+                if (!item || !item.rawText) {
+                    return;
+                }
+
+                const data = JSON.parse(String(item.rawText || ""));
+                const rows = _extractJsonRows(data);
+                if (!rows || rows.length === 0) {
+                    return;
+                }
+
+                _renderManualJsonTable(rows, item.fileName || "manual.json");
+                setGlobal(`JSON restored: ${item.fileName || "manual.json"} (${rows.length} rows)`);
+            } catch (e) {
+                console.warn("auto restore manual json failed", e);
+            } finally {
+                manualJsonAutoRestoreInFlight = false;
+                manualJsonAutoRestoreDone = true;
             }
         }
 

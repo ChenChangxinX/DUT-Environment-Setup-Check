@@ -341,6 +341,52 @@ def _save_manual_json_upload(user_id: str, node_id: str, file_name: str, row_cou
         "uploadedAt": uploaded_at,
     }
 
+
+def _get_latest_manual_json_upload(user_id: str, node_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    uid = _normalize_user_id(user_id)
+    nid = _normalize_node_id(node_id) if node_id is not None else None
+
+    with _filter_prefs_lock:
+        conn = _db_connect()
+        try:
+            if nid:
+                row = conn.execute(
+                    """
+                    SELECT id, user_id, node_id, file_name, row_count, raw_text, uploaded_at
+                    FROM manual_json_uploads
+                    WHERE user_id = ? AND node_id = ?
+                    ORDER BY uploaded_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (uid, nid),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT id, user_id, node_id, file_name, row_count, raw_text, uploaded_at
+                    FROM manual_json_uploads
+                    WHERE user_id = ?
+                    ORDER BY uploaded_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (uid,),
+                ).fetchone()
+        finally:
+            conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "id": int(row["id"] or 0),
+        "userId": str(row["user_id"] or ""),
+        "nodeId": str(row["node_id"] or ""),
+        "fileName": str(row["file_name"] or ""),
+        "rowCount": int(row["row_count"] or 0),
+        "rawText": str(row["raw_text"] or ""),
+        "uploadedAt": int(row["uploaded_at"] or 0),
+    }
+
 def cache_get(node_id: str) -> Optional[Dict[str, Any]]:
     entry = _cache.get(node_id)
     if not entry:
@@ -1070,6 +1116,19 @@ async def save_manual_json_upload(request: Request):
     return {
         "ok": True,
         **saved,
+    }
+
+
+@app.get("/api/manual-json/uploads/latest")
+async def get_latest_manual_json_upload(request: Request):
+    user_id = _normalize_user_id(request.query_params.get("userId", "default"))
+    raw_node_id = request.query_params.get("nodeId")
+    node_id = _normalize_node_id(raw_node_id) if raw_node_id not in (None, "") else None
+
+    item = _get_latest_manual_json_upload(user_id, node_id)
+    return {
+        "ok": True,
+        "item": item,
     }
 
 
