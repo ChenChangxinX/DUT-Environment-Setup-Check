@@ -639,8 +639,6 @@
         <div class="api-config">
             <input type="text" id="apiBaseInput" placeholder="API Base URL (e.g., http://localhost:8001)">
             <button id="saveApiBaseBtn">Save</button>
-            <input type="text" id="userIdInput" placeholder="User ID (e.g., cchen21x)">
-            <button id="saveUserIdBtn">Apply User</button>
             <div class="status-line" id="globalStatus">Initializing...</div>
         </div>
     </div>
@@ -671,14 +669,13 @@
         // Auto-detect localhost for local development
         const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
         const defaultApiBase = isLocalhost ? `http://${location.hostname}:8001` : "";
+        const DEFAULT_PREF_USER_ID = "default";
         
         const urlParams = new URLSearchParams(location.search);
         const queryBase = urlParams.get("apiBase") || "";
-        const queryUserId = urlParams.get("userId") || "";
         const storedBase = localStorage.getItem("hub_api_base") || "";
-        const storedUserId = localStorage.getItem("hub_user_id") || "";
         let apiBase = (queryBase || storedBase || defaultApiBase).trim().replace(/\/$/, "");
-        let currentUserId = (queryUserId || storedUserId || "default").trim() || "default";
+        const currentUserId = DEFAULT_PREF_USER_ID;
 
         const serverMeta = {};
         let nodeList = [];
@@ -2038,22 +2035,13 @@
         (async function bootstrap() {
             const input = document.getElementById("apiBaseInput");
             const saveBtn = document.getElementById("saveApiBaseBtn");
-            const userIdInput = document.getElementById("userIdInput");
-            const saveUserIdBtn = document.getElementById("saveUserIdBtn");
 
             await loadJiraFilters(selectedNodeId);
 
             input.value = apiBase;
-            userIdInput.value = currentUserId;
             saveBtn.addEventListener("click", () => {
                 apiBase = (input.value || "").trim().replace(/\/$/, "");
                 localStorage.setItem("hub_api_base", apiBase);
-                location.reload();
-            });
-            saveUserIdBtn.addEventListener("click", () => {
-                const newUserId = (userIdInput.value || "").trim() || "default";
-                currentUserId = newUserId;
-                localStorage.setItem("hub_user_id", currentUserId);
                 location.reload();
             });
 
