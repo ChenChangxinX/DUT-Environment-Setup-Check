@@ -60,6 +60,7 @@ FIXED_FILTER_SECTION_MAP = {
 
 FILTER_PREF_KEYS = ("specificDut", "lightEquipment", "testChart", "testScene")
 FILTER_PREF_DEFAULT_NODE = "__GLOBAL__"
+MANUAL_JSON_MAX_BYTES = 10 * 1024 * 1024
 
 # ----------------------------
 # In-memory cache (replaces Redis)
@@ -157,6 +158,20 @@ def _init_filter_prefs_db() -> None:
             conn.execute("UPDATE jira_filter_preferences SET light_equipment='__EMPTY__' WHERE light_equipment='__ANY__'")
             conn.execute("UPDATE jira_filter_preferences SET test_chart='__EMPTY__' WHERE test_chart='__ANY__'")
             conn.execute("UPDATE jira_filter_preferences SET test_scene='__EMPTY__' WHERE test_scene='__ANY__'")
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS manual_json_uploads (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    file_name TEXT NOT NULL,
+                    row_count INTEGER NOT NULL DEFAULT 0,
+                    raw_text TEXT NOT NULL,
+                    uploaded_at INTEGER NOT NULL
+                )
+                """
+            )
 
             conn.commit()
         finally:
@@ -287,6 +302,43 @@ def _set_filter_preferences(user_id: str, node_id: str, filters: Any) -> Dict[st
         "nodeId": nid,
         "filters": clean_filters,
         "updatedAt": updated_at,
+    }
+
+
+def _save_manual_json_upload(user_id: str, node_id: str, file_name: str, row_count: int, raw_text: str) -> Dict[str, Any]:
+    uid = _normalize_user_id(user_id)
+    nid = _normalize_node_id(node_id)
+    name = str(file_name or "").strip()[:255] or "manual.json"
+    payload = str(raw_text or "")
+    if len(payload.encode("utf-8", errors="ignore")) > MANUAL_JSON_MAX_BYTES:
+        raise HTTPException(status_code=413, detail=f"manual json too large (> {MANUAL_JSON_MAX_BYTES} bytes)")
+
+    safe_row_count = max(0, int(row_count or 0))
+    uploaded_at = int(time.time())
+
+    with _filter_prefs_lock:
+        conn = _db_connect()
+        try:
+            cur = conn.execute(
+                """
+                INSERT INTO manual_json_uploads (
+                    user_id, node_id, file_name, row_count, raw_text, uploaded_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (uid, nid, name, safe_row_count, payload, uploaded_at),
+            )
+            conn.commit()
+            inserted_id = int(cur.lastrowid or 0)
+        finally:
+            conn.close()
+
+    return {
+        "id": inserted_id,
+        "userId": uid,
+        "nodeId": nid,
+        "fileName": name,
+        "rowCount": safe_row_count,
+        "uploadedAt": uploaded_at,
     }
 
 def cache_get(node_id: str) -> Optional[Dict[str, Any]]:
@@ -996,6 +1048,28 @@ async def jira_put_filter_preferences(request: Request):
         "filters": data["filters"],
         "updatedAt": data["updatedAt"],
         "strategy": "last_write_wins",
+    }
+
+
+@app.post("/api/manual-json/uploads")
+async def save_manual_json_upload(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="invalid request body")
+
+    user_id = _normalize_user_id(body.get("userId", "default"))
+    node_id = _normalize_node_id(body.get("nodeId", FILTER_PREF_DEFAULT_NODE))
+    file_name = str(body.get("fileName") or "").strip()
+    raw_text = body.get("rawText")
+    row_count = body.get("rowCount", 0)
+
+    if not raw_text:
+        raise HTTPException(status_code=400, detail="rawText is required")
+
+    saved = _save_manual_json_upload(user_id, node_id, file_name, row_count, str(raw_text))
+    return {
+        "ok": True,
+        **saved,
     }
 
 

@@ -904,6 +904,25 @@
             return await r.json();
         }
 
+        async function saveManualJsonUpload(fileName, rawText, rowCount) {
+            const r = await fetch(apiUrl("/api/manual-json/uploads"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    userId: "default",
+                    nodeId: selectedNodeId || "__GLOBAL__",
+                    fileName: fileName || "manual.json",
+                    rowCount: Number(rowCount || 0),
+                    rawText: String(rawText || ""),
+                }),
+            });
+            if (!r.ok) {
+                const err = await r.json().catch(() => ({ detail: `HTTP ${r.status}` }));
+                throw new Error(err.detail || `HTTP ${r.status}`);
+            }
+            return await r.json();
+        }
+
         function updateGlobalJiraFilter(key, value) {
             globalJiraFilters[key] = value;
             saveJiraFiltersToLocal(selectedNodeId);
@@ -1670,13 +1689,19 @@
             const file = event?.target?.files?.[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = () => {
+            reader.onload = async () => {
                 try {
                     const text = String(reader.result || "");
                     const data = JSON.parse(text);
                     const rows = _extractJsonRows(data);
                     _renderManualJsonTable(rows, file.name);
-                    setGlobal(`JSON parsed: ${file.name} (${rows.length} rows)`);
+
+                    try {
+                        const saved = await saveManualJsonUpload(file.name, text, rows.length);
+                        setGlobal(`JSON parsed: ${file.name} (${rows.length} rows), DB saved #${saved.id || "-"}`);
+                    } catch (saveErr) {
+                        setGlobal(`JSON parsed: ${file.name} (${rows.length} rows), DB save failed: ${saveErr.message}`);
+                    }
                 } catch (e) {
                     setGlobal(`JSON parse failed: ${e.message}`);
                     alert(`JSON parse failed: ${e.message}`);
