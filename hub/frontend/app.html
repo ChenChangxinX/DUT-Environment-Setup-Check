@@ -680,18 +680,61 @@
         let manualJsonTableState = { rows: null, fileName: "" };
         let jiraCasesSynced = false;
         let jiraSyncMeta = {};
+        const DEFAULT_FIXED_JIRA_CASE_OPTIONS = {
+            specificDut: [
+                "RVP (CSE Privacy Rework)",
+                "RVP (VCIP Rework)",
+                "RVP (CSE Privacy + Automation Rework)",
+                "RVP with CH583",
+                "RVP with Thumb Robot",
+            ],
+            lightEquipment: [
+                "Lightbox – Colorspace",
+                "Lightbox – TILO120",
+                "Lightbox – TILO60",
+                "Lightbox – Yanding Transmissive Lightbox",
+                "Lamp – Flicker (50Hz/60Hz)",
+                "Lamp – Backlight",
+                "Lamp – Side Lighting",
+            ],
+            testChart: [
+                "In-house Multi-functional Test Chart (A4 size)",
+                "In-house Test Chart for FOV/Zoom (700mm x700 mm)",
+                "24-color Checker Chart",
+                "Single-face Test Chart (A4 size)",
+                "Multi-face Test Chart (A4 size)",
+            ],
+            testScene: [
+                "Single Head Model – Black",
+                "Single Head Model – White",
+                "Single Head Model – Yellow",
+                "Single Head Model – Black with Glasses",
+                "Single Head Model – Yellow with Mask",
+                "Single Head Model – White with Mask",
+                "Multiple Head Models",
+                "Single Head Model – Rail Motion",
+                "Multiple Head Models – Rail Motion",
+                "Real Human",
+                "Turntable Rotation",
+                "HDR Scene",
+                "SAP Motion Scene",
+                "SAP Static Scene",
+                "Frosted Glass Scene",
+                "Low-Light Distance (30 cm – 2 m)",
+                "Earphone Occlusion",
+                "Black Box Environment",
+                "Touch ROI scene",
+                "SAP Multi-user Scene",
+                "Swing Test Scene",
+            ],
+        };
         let jiraCaseOptions = {
             specificDut: [],
             lightEquipment: [],
             testChart: [],
             testScene: [],
         };
-        let fixedJiraCaseOptions = {
-            specificDut: [],
-            lightEquipment: [],
-            testChart: [],
-            testScene: [],
-        };
+        let fixedJiraCaseOptions = { ...DEFAULT_FIXED_JIRA_CASE_OPTIONS };
         const globalJiraFilters = {
             specificDut: "__ANY__",
             lightEquipment: "__ANY__",
