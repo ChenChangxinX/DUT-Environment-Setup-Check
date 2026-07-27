@@ -736,6 +736,7 @@
             testScene: [],
         };
         let fixedJiraCaseOptions = { ...DEFAULT_FIXED_JIRA_CASE_OPTIONS };
+        const JIRA_FILTERS_STORAGE_KEY = "hub_jira_global_filters";
         const globalJiraFilters = {
             specificDut: "__ANY__",
             lightEquipment: "__ANY__",
@@ -874,6 +875,31 @@
 
         function updateGlobalJiraFilter(key, value) {
             globalJiraFilters[key] = value;
+            saveJiraFilters();
+        }
+
+        function saveJiraFilters() {
+            try {
+                localStorage.setItem(JIRA_FILTERS_STORAGE_KEY, JSON.stringify(globalJiraFilters));
+            } catch (e) {
+                console.log("Save Jira filters failed: " + e.message);
+            }
+        }
+
+        function loadJiraFilters() {
+            try {
+                const raw = localStorage.getItem(JIRA_FILTERS_STORAGE_KEY);
+                if (!raw) return;
+                const parsed = JSON.parse(raw);
+                ["specificDut", "lightEquipment", "testChart", "testScene"].forEach(k => {
+                    const v = parsed?.[k];
+                    if (typeof v === "string" && v.trim()) {
+                        globalJiraFilters[k] = v;
+                    }
+                });
+            } catch (e) {
+                console.log("Load Jira filters failed: " + e.message);
+            }
         }
 
         function _normalizeOptionValue(v) {
@@ -1946,6 +1972,8 @@
         (async function bootstrap() {
             const input = document.getElementById("apiBaseInput");
             const saveBtn = document.getElementById("saveApiBaseBtn");
+
+            loadJiraFilters();
 
             input.value = apiBase;
             saveBtn.addEventListener("click", () => {
