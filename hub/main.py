@@ -173,7 +173,7 @@ def _normalize_node_id(value: Any) -> str:
 def _normalize_filter_value(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
-        return "__ANY__"
+        return "__EMPTY__"
     return text[:512]
 
 
@@ -183,7 +183,7 @@ def _normalize_filter_payload(payload: Any) -> Dict[str, str]:
 
 
 def _default_filter_preferences() -> Dict[str, str]:
-    return {k: "__ANY__" for k in FILTER_PREF_KEYS}
+    return {k: "__EMPTY__" for k in FILTER_PREF_KEYS}
 
 
 def _get_filter_preferences(user_id: str, node_id: str) -> Dict[str, Any]:
@@ -215,10 +215,10 @@ def _get_filter_preferences(user_id: str, node_id: str) -> Dict[str, Any]:
         "userId": uid,
         "nodeId": nid,
         "filters": {
-            "specificDut": str(row["specific_dut"] or "__ANY__"),
-            "lightEquipment": str(row["light_equipment"] or "__ANY__"),
-            "testChart": str(row["test_chart"] or "__ANY__"),
-            "testScene": str(row["test_scene"] or "__ANY__"),
+            "specificDut": str(row["specific_dut"] or "__EMPTY__"),
+            "lightEquipment": str(row["light_equipment"] or "__EMPTY__"),
+            "testChart": str(row["test_chart"] or "__EMPTY__"),
+            "testScene": str(row["test_scene"] or "__EMPTY__"),
         },
         "updatedAt": int(row["updated_at"] or 0),
     }

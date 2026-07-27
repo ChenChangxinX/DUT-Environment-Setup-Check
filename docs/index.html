@@ -742,10 +742,10 @@
         const DEFAULT_FILTER_NODE_ID = "__GLOBAL__";
         const JIRA_FILTERS_STORAGE_KEY_PREFIX = "hub_jira_global_filters::";
         const globalJiraFilters = {
-            specificDut: "__ANY__",
-            lightEquipment: "__ANY__",
-            testChart: "__ANY__",
-            testScene: "__ANY__",
+            specificDut: "__EMPTY__",
+            lightEquipment: "__EMPTY__",
+            testChart: "__EMPTY__",
+            testScene: "__EMPTY__",
         };
         let jiraSyncInProgress = false;
         const jiraSyncConfig = {
@@ -856,10 +856,10 @@
         }
 
         function _resetGlobalJiraFilters() {
-            globalJiraFilters.specificDut = "__ANY__";
-            globalJiraFilters.lightEquipment = "__ANY__";
-            globalJiraFilters.testChart = "__ANY__";
-            globalJiraFilters.testScene = "__ANY__";
+            globalJiraFilters.specificDut = "__EMPTY__";
+            globalJiraFilters.lightEquipment = "__EMPTY__";
+            globalJiraFilters.testChart = "__EMPTY__";
+            globalJiraFilters.testScene = "__EMPTY__";
         }
 
         async function getJiraFilterPreferences(userId, nodeId) {
