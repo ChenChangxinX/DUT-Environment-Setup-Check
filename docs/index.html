@@ -1712,6 +1712,12 @@
             const row = rows[idx];
             if (!row) return;
 
+            const triggerContent = document.getElementById("triggerContent");
+            const detailContent = triggerContent ? triggerContent.closest(".detail-content") : null;
+            const previousDetailScrollTop = detailContent ? detailContent.scrollTop : 0;
+            const previousContentScrollTop = triggerContent ? triggerContent.scrollTop : 0;
+            const previousWindowScrollY = window.scrollY;
+
             const envMeta = _extractTestEnvironmentMeta(row);
             const rowMeta = {
                 rvpType: _deriveManualBoardType(row, envMeta),
@@ -1724,6 +1730,13 @@
             manualJsonTableState.matches = manualJsonTableState.matches || {};
             manualJsonTableState.matches[idx] = result;
             _renderManualJsonTable(manualJsonTableState.rows || [], manualJsonTableState.fileName || "");
+
+            requestAnimationFrame(() => {
+                if (detailContent) detailContent.scrollTop = previousDetailScrollTop;
+                if (triggerContent) triggerContent.scrollTop = previousContentScrollTop;
+                window.scrollTo(0, previousWindowScrollY);
+            });
+
             setGlobal(`Row ${idx + 1} matched DUT: ${result.ids.join(", ") || "none"}`);
         }
 
