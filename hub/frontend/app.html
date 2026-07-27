@@ -638,6 +638,8 @@
         <div class="api-config">
             <input type="text" id="apiBaseInput" placeholder="API Base URL (e.g., http://localhost:8001)">
             <button id="saveApiBaseBtn">Save</button>
+            <input type="text" id="userIdInput" placeholder="User ID (e.g., cchen21x)">
+            <button id="saveUserIdBtn">Apply User</button>
             <div class="status-line" id="globalStatus">Initializing...</div>
         </div>
     </div>
@@ -669,9 +671,13 @@
         const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
         const defaultApiBase = isLocalhost ? `http://${location.hostname}:8001` : "";
         
-        const queryBase = new URLSearchParams(location.search).get("apiBase") || "";
+        const urlParams = new URLSearchParams(location.search);
+        const queryBase = urlParams.get("apiBase") || "";
+        const queryUserId = urlParams.get("userId") || "";
         const storedBase = localStorage.getItem("hub_api_base") || "";
+        const storedUserId = localStorage.getItem("hub_user_id") || "";
         let apiBase = (queryBase || storedBase || defaultApiBase).trim().replace(/\/$/, "");
+        let currentUserId = (queryUserId || storedUserId || "default").trim() || "default";
 
         const serverMeta = {};
         let nodeList = [];
@@ -735,7 +741,7 @@
             testScene: [],
         };
         let fixedJiraCaseOptions = { ...DEFAULT_FIXED_JIRA_CASE_OPTIONS };
-        const JIRA_FILTERS_STORAGE_KEY = "hub_jira_global_filters";
+        const JIRA_FILTERS_STORAGE_KEY_PREFIX = "hub_jira_global_filters::";
         const globalJiraFilters = {
             specificDut: "__ANY__",
             lightEquipment: "__ANY__",
@@ -846,6 +852,22 @@
             return await r.json();
         }
 
+        async function getJiraFilterPreferences(userId) {
+            const r = await fetch(apiUrl(`/api/jira/filter-preferences?userId=${encodeURIComponent(userId || "default")}`));
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return await r.json();
+        }
+
+        async function putJiraFilterPreferences(userId, filters) {
+            const r = await fetch(apiUrl("/api/jira/filter-preferences"), {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId, filters }),
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return await r.json();
+        }
+
         async function syncJiraCases(payload) {
             const r = await fetch(apiUrl("/api/jira/sync-cases"), {
                 method: "POST",
@@ -874,20 +896,25 @@
 
         function updateGlobalJiraFilter(key, value) {
             globalJiraFilters[key] = value;
-            saveJiraFilters();
+            saveJiraFiltersToLocal();
+            void saveJiraFiltersToServer();
         }
 
-        function saveJiraFilters() {
+        function _filterStorageKey() {
+            return `${JIRA_FILTERS_STORAGE_KEY_PREFIX}${currentUserId || "default"}`;
+        }
+
+        function saveJiraFiltersToLocal() {
             try {
-                localStorage.setItem(JIRA_FILTERS_STORAGE_KEY, JSON.stringify(globalJiraFilters));
+                localStorage.setItem(_filterStorageKey(), JSON.stringify(globalJiraFilters));
             } catch (e) {
                 console.log("Save Jira filters failed: " + e.message);
             }
         }
 
-        function loadJiraFilters() {
+        function loadJiraFiltersFromLocal() {
             try {
-                const raw = localStorage.getItem(JIRA_FILTERS_STORAGE_KEY);
+                const raw = localStorage.getItem(_filterStorageKey());
                 if (!raw) return;
                 const parsed = JSON.parse(raw);
                 ["specificDut", "lightEquipment", "testChart", "testScene"].forEach(k => {
@@ -898,6 +925,31 @@
                 });
             } catch (e) {
                 console.log("Load Jira filters failed: " + e.message);
+            }
+        }
+
+        async function loadJiraFilters() {
+            loadJiraFiltersFromLocal();
+            try {
+                const payload = await getJiraFilterPreferences(currentUserId);
+                const remote = payload?.filters || {};
+                ["specificDut", "lightEquipment", "testChart", "testScene"].forEach(k => {
+                    const v = remote?.[k];
+                    if (typeof v === "string" && v.trim()) {
+                        globalJiraFilters[k] = v;
+                    }
+                });
+                saveJiraFiltersToLocal();
+            } catch (e) {
+                console.log("Load Jira filters from server failed: " + e.message);
+            }
+        }
+
+        async function saveJiraFiltersToServer() {
+            try {
+                await putJiraFilterPreferences(currentUserId, globalJiraFilters);
+            } catch (e) {
+                console.log("Save Jira filters to server failed: " + e.message);
             }
         }
 
@@ -1971,13 +2023,22 @@
         (async function bootstrap() {
             const input = document.getElementById("apiBaseInput");
             const saveBtn = document.getElementById("saveApiBaseBtn");
+            const userIdInput = document.getElementById("userIdInput");
+            const saveUserIdBtn = document.getElementById("saveUserIdBtn");
 
-            loadJiraFilters();
+            await loadJiraFilters();
 
             input.value = apiBase;
+            userIdInput.value = currentUserId;
             saveBtn.addEventListener("click", () => {
                 apiBase = (input.value || "").trim().replace(/\/$/, "");
                 localStorage.setItem("hub_api_base", apiBase);
+                location.reload();
+            });
+            saveUserIdBtn.addEventListener("click", () => {
+                const newUserId = (userIdInput.value || "").trim() || "default";
+                currentUserId = newUserId;
+                localStorage.setItem("hub_user_id", currentUserId);
                 location.reload();
             });
 

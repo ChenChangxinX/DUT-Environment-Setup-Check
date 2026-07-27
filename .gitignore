@@ -6,6 +6,7 @@ __pycache__/
 
 # runtime artifacts
 hub/logs/
+hub/filter_preferences.db
 
 # local editor files
 .vscode/

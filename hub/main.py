@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import secrets
+import sqlite3
 import sys
 import threading
 import time
@@ -22,6 +23,7 @@ app = FastAPI(title="Hub Aggregator")
 BASE_DIR = Path(__file__).parent
 NODES_PATH = Path(__file__).with_name("nodes.json")
 TEST_ENV_INFO_PATH = BASE_DIR / "test_env_info.ini"
+FILTER_PREFS_DB_PATH = BASE_DIR / "filter_preferences.db"
 
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "86400"))  # 24h
 LOCK_TTL_SECONDS = int(os.getenv("LOCK_TTL_SECONDS", "900"))      # 15min
@@ -56,6 +58,8 @@ FIXED_FILTER_SECTION_MAP = {
     "test scene": "testScene",
 }
 
+FILTER_PREF_KEYS = ("specificDut", "lightEquipment", "testChart", "testScene")
+
 # ----------------------------
 # In-memory cache (replaces Redis)
 # ----------------------------
@@ -63,6 +67,7 @@ FIXED_FILTER_SECTION_MAP = {
 _cache: Dict[str, Any] = {}
 # Per-node asyncio locks (replaces Redis distributed lock)
 _locks: Dict[str, asyncio.Lock] = {}
+_filter_prefs_lock = threading.Lock()
 
 def _get_lock(node_id: str) -> asyncio.Lock:
     if node_id not in _locks:
@@ -87,6 +92,147 @@ def _cache_save() -> None:
 @app.on_event("startup")
 async def startup_event():
     _cache_load()
+    _init_filter_prefs_db()
+
+
+def _db_connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(FILTER_PREFS_DB_PATH), timeout=10)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _init_filter_prefs_db() -> None:
+    with _filter_prefs_lock:
+        conn = _db_connect()
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS jira_filter_preferences (
+                    user_id TEXT PRIMARY KEY,
+                    specific_dut TEXT NOT NULL DEFAULT '__ANY__',
+                    light_equipment TEXT NOT NULL DEFAULT '__ANY__',
+                    test_chart TEXT NOT NULL DEFAULT '__ANY__',
+                    test_scene TEXT NOT NULL DEFAULT '__ANY__',
+                    updated_at INTEGER NOT NULL
+                )
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _normalize_user_id(value: Any) -> str:
+    user_id = str(value or "").strip()
+    if not user_id:
+        return "default"
+    return user_id[:128]
+
+
+def _normalize_filter_value(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "__ANY__"
+    return text[:512]
+
+
+def _normalize_filter_payload(payload: Any) -> Dict[str, str]:
+    obj = payload if isinstance(payload, dict) else {}
+    return {k: _normalize_filter_value(obj.get(k)) for k in FILTER_PREF_KEYS}
+
+
+def _default_filter_preferences() -> Dict[str, str]:
+    return {k: "__ANY__" for k in FILTER_PREF_KEYS}
+
+
+def _get_filter_preferences(user_id: str) -> Dict[str, Any]:
+    uid = _normalize_user_id(user_id)
+    with _filter_prefs_lock:
+        conn = _db_connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT specific_dut, light_equipment, test_chart, test_scene, updated_at
+                FROM jira_filter_preferences
+                WHERE user_id = ?
+                """,
+                (uid,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+    if not row:
+        return {
+            "userId": uid,
+            "filters": _default_filter_preferences(),
+            "updatedAt": 0,
+        }
+
+    return {
+        "userId": uid,
+        "filters": {
+            "specificDut": str(row["specific_dut"] or "__ANY__"),
+            "lightEquipment": str(row["light_equipment"] or "__ANY__"),
+            "testChart": str(row["test_chart"] or "__ANY__"),
+            "testScene": str(row["test_scene"] or "__ANY__"),
+        },
+        "updatedAt": int(row["updated_at"] or 0),
+    }
+
+
+def _set_filter_preferences(user_id: str, filters: Any) -> Dict[str, Any]:
+    uid = _normalize_user_id(user_id)
+    clean_filters = _normalize_filter_payload(filters)
+    updated_at = int(time.time())
+
+    with _filter_prefs_lock:
+        conn = _db_connect()
+        try:
+            cur = conn.execute(
+                """
+                UPDATE jira_filter_preferences
+                SET specific_dut = ?,
+                    light_equipment = ?,
+                    test_chart = ?,
+                    test_scene = ?,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (
+                    clean_filters["specificDut"],
+                    clean_filters["lightEquipment"],
+                    clean_filters["testChart"],
+                    clean_filters["testScene"],
+                    updated_at,
+                    uid,
+                ),
+            )
+
+            if cur.rowcount == 0:
+                conn.execute(
+                    """
+                    INSERT INTO jira_filter_preferences (
+                        user_id, specific_dut, light_equipment, test_chart, test_scene, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        uid,
+                        clean_filters["specificDut"],
+                        clean_filters["lightEquipment"],
+                        clean_filters["testChart"],
+                        clean_filters["testScene"],
+                        updated_at,
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    return {
+        "userId": uid,
+        "filters": clean_filters,
+        "updatedAt": updated_at,
+    }
 
 def cache_get(node_id: str) -> Optional[Dict[str, Any]]:
     entry = _cache.get(node_id)
@@ -764,6 +910,33 @@ async def jira_get_fixed_filter_options():
     return {
         "ok": True,
         "options": _load_fixed_filter_options(),
+    }
+
+
+@app.get("/api/jira/filter-preferences")
+async def jira_get_filter_preferences(request: Request):
+    user_id = _normalize_user_id(request.query_params.get("userId", "default"))
+    data = _get_filter_preferences(user_id)
+    return {
+        "ok": True,
+        "userId": data["userId"],
+        "filters": data["filters"],
+        "updatedAt": data["updatedAt"],
+    }
+
+
+@app.put("/api/jira/filter-preferences")
+async def jira_put_filter_preferences(request: Request):
+    body = await request.json()
+    user_id = _normalize_user_id((body or {}).get("userId"))
+    filters = (body or {}).get("filters")
+    data = _set_filter_preferences(user_id, filters)
+    return {
+        "ok": True,
+        "userId": data["userId"],
+        "filters": data["filters"],
+        "updatedAt": data["updatedAt"],
+        "strategy": "last_write_wins",
     }
 
 
