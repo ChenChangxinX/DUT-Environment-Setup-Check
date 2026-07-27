@@ -151,6 +151,13 @@ def _init_filter_prefs_db() -> None:
                 conn.execute("DROP TABLE jira_filter_preferences")
                 conn.execute("ALTER TABLE jira_filter_preferences_v2 RENAME TO jira_filter_preferences")
 
+            # Data migration: legacy versions persisted unconfigured fields as __ANY__.
+            # Normalize them to __EMPTY__ so default behavior stays consistent.
+            conn.execute("UPDATE jira_filter_preferences SET specific_dut='__EMPTY__' WHERE specific_dut='__ANY__'")
+            conn.execute("UPDATE jira_filter_preferences SET light_equipment='__EMPTY__' WHERE light_equipment='__ANY__'")
+            conn.execute("UPDATE jira_filter_preferences SET test_chart='__EMPTY__' WHERE test_chart='__ANY__'")
+            conn.execute("UPDATE jira_filter_preferences SET test_scene='__EMPTY__' WHERE test_scene='__ANY__'")
+
             conn.commit()
         finally:
             conn.close()
