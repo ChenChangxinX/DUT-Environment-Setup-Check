@@ -905,6 +905,43 @@
             return await r.json();
         }
 
+        async function getJiraMatchCache(userId, nodeId, boardType, filters) {
+            const params = new URLSearchParams({
+                userId: String(userId || "default"),
+                nodeId: _normalizeFilterNodeId(nodeId),
+                boardType: String(boardType || ""),
+                specificDut: String(filters?.specificDut || ""),
+                lightEquipment: String(filters?.lightEquipment || ""),
+                testChart: String(filters?.testChart || ""),
+                testScene: String(filters?.testScene || ""),
+            });
+            const r = await fetch(apiUrl(`/api/jira/match-cache?${params.toString()}`));
+            if (!r.ok) {
+                const err = await r.json().catch(() => ({ detail: `HTTP ${r.status}` }));
+                throw new Error(err.detail || `HTTP ${r.status}`);
+            }
+            return await r.json();
+        }
+
+        async function saveJiraMatchCache(userId, nodeId, boardType, filters, cases) {
+            const r = await fetch(apiUrl("/api/jira/match-cache"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    userId: String(userId || "default"),
+                    nodeId: _normalizeFilterNodeId(nodeId),
+                    boardType: String(boardType || ""),
+                    filters: filters || {},
+                    cases: Array.isArray(cases) ? cases : [],
+                }),
+            });
+            if (!r.ok) {
+                const err = await r.json().catch(() => ({ detail: `HTTP ${r.status}` }));
+                throw new Error(err.detail || `HTTP ${r.status}`);
+            }
+            return await r.json();
+        }
+
         async function saveManualJsonUpload(fileName, rawText, rowCount) {
             const r = await fetch(apiUrl("/api/manual-json/uploads"), {
                 method: "POST",
@@ -1305,13 +1342,42 @@
             const selectedNode = nodeList.find(n => n.id === nodeId) || {};
             const cameraText = selectedNode.camera || "";
             const boardType = _detectDutBoardType({ ...selectedNode, id: nodeId });
+
+            try {
+                const cachePayload = await getJiraMatchCache(currentUserId, nodeId, boardType, filters);
+                const cachedItem = cachePayload?.item;
+                if (cachedItem && Array.isArray(cachedItem.cases)) {
+                    const cachedCases = cachedItem.cases;
+                    const body = `
+                        <div style="margin-bottom:0.7rem; color:#2c3e50;">
+                            <strong>Node:</strong> ${esc(nodeId)} &nbsp;&nbsp; <strong>Board:</strong> ${esc(boardType || "-")} &nbsp;&nbsp; <strong>Camera:</strong> ${esc(cameraText || "-")} &nbsp;&nbsp; <strong>Matched:</strong> ${cachedCases.length}
+                            &nbsp;&nbsp; <strong>Source:</strong> Cache
+                        </div>
+                        ${renderMatchCasesTable(cachedCases)}
+                    `;
+                    openModal(`Matched Cases - ${nodeId}`, body);
+                    setGlobal(`Loaded ${cachedCases.length} cached Jira cases for ${nodeId}`);
+                    return;
+                }
+            } catch (e) {
+                console.log("Load Jira match cache failed: " + e.message);
+            }
+
             setGlobal(`Matching Jira cases for ${nodeId}...`);
             try {
                 const payload = await matchJiraCases({ nodeId, ...filters });
                 const filteredCases = _filterCasesByBoardType(payload.cases || [], boardType);
+
+                try {
+                    await saveJiraMatchCache(currentUserId, nodeId, boardType, filters, filteredCases);
+                } catch (e) {
+                    console.log("Save Jira match cache failed: " + e.message);
+                }
+
                 const body = `
                     <div style="margin-bottom:0.7rem; color:#2c3e50;">
                         <strong>Node:</strong> ${esc(nodeId)} &nbsp;&nbsp; <strong>Board:</strong> ${esc(boardType || "-")} &nbsp;&nbsp; <strong>Camera:</strong> ${esc(cameraText || "-")} &nbsp;&nbsp; <strong>Matched:</strong> ${filteredCases.length}
+                        &nbsp;&nbsp; <strong>Source:</strong> Live
                     </div>
                     ${renderMatchCasesTable(filteredCases)}
                 `;

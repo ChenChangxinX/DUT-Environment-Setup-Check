@@ -61,6 +61,7 @@ FIXED_FILTER_SECTION_MAP = {
 FILTER_PREF_KEYS = ("specificDut", "lightEquipment", "testChart", "testScene")
 FILTER_PREF_DEFAULT_NODE = "__GLOBAL__"
 MANUAL_JSON_MAX_BYTES = 10 * 1024 * 1024
+JIRA_MATCH_CACHE_MAX_BYTES = 10 * 1024 * 1024
 
 # ----------------------------
 # In-memory cache (replaces Redis)
@@ -173,6 +174,22 @@ def _init_filter_prefs_db() -> None:
                 """
             )
 
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS jira_match_cache (
+                    user_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    board_type TEXT NOT NULL,
+                    filter_signature TEXT NOT NULL,
+                    filters_json TEXT NOT NULL,
+                    cases_json TEXT NOT NULL,
+                    case_count INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (user_id, node_id, board_type, filter_signature)
+                )
+                """
+            )
+
             conn.commit()
         finally:
             conn.close()
@@ -206,6 +223,12 @@ def _normalize_filter_payload(payload: Any) -> Dict[str, str]:
 
 def _default_filter_preferences() -> Dict[str, str]:
     return {k: "__EMPTY__" for k in FILTER_PREF_KEYS}
+
+
+def _filter_signature(filters: Any) -> Tuple[str, Dict[str, str]]:
+    clean = _normalize_filter_payload(filters)
+    sig = json.dumps(clean, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return sig, clean
 
 
 def _get_filter_preferences(user_id: str, node_id: str) -> Dict[str, Any]:
@@ -385,6 +408,107 @@ def _get_latest_manual_json_upload(user_id: str, node_id: Optional[str] = None) 
         "rowCount": int(row["row_count"] or 0),
         "rawText": str(row["raw_text"] or ""),
         "uploadedAt": int(row["uploaded_at"] or 0),
+    }
+
+
+def _set_jira_match_cache(user_id: str, node_id: str, board_type: str, filters: Any, cases: Any) -> Dict[str, Any]:
+    uid = _normalize_user_id(user_id)
+    nid = _normalize_node_id(node_id)
+    btype = str(board_type or "").strip().upper()[:64]
+    if not btype:
+        btype = "UNKNOWN"
+
+    signature, clean_filters = _filter_signature(filters)
+    case_list = cases if isinstance(cases, list) else []
+    case_count = len(case_list)
+
+    filters_json = json.dumps(clean_filters, ensure_ascii=False, separators=(",", ":"))
+    cases_json = json.dumps(case_list, ensure_ascii=False, separators=(",", ":"))
+    if len(cases_json.encode("utf-8", errors="ignore")) > JIRA_MATCH_CACHE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail=f"jira matched cases too large (> {JIRA_MATCH_CACHE_MAX_BYTES} bytes)")
+
+    updated_at = int(time.time())
+
+    with _filter_prefs_lock:
+        conn = _db_connect()
+        try:
+            cur = conn.execute(
+                """
+                UPDATE jira_match_cache
+                SET filters_json = ?,
+                    cases_json = ?,
+                    case_count = ?,
+                    updated_at = ?
+                WHERE user_id = ? AND node_id = ? AND board_type = ? AND filter_signature = ?
+                """,
+                (filters_json, cases_json, case_count, updated_at, uid, nid, btype, signature),
+            )
+            if cur.rowcount == 0:
+                conn.execute(
+                    """
+                    INSERT INTO jira_match_cache (
+                        user_id, node_id, board_type, filter_signature, filters_json, cases_json, case_count, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (uid, nid, btype, signature, filters_json, cases_json, case_count, updated_at),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    return {
+        "userId": uid,
+        "nodeId": nid,
+        "boardType": btype,
+        "filters": clean_filters,
+        "caseCount": case_count,
+        "updatedAt": updated_at,
+    }
+
+
+def _get_jira_match_cache(user_id: str, node_id: str, board_type: str, filters: Any) -> Optional[Dict[str, Any]]:
+    uid = _normalize_user_id(user_id)
+    nid = _normalize_node_id(node_id)
+    btype = str(board_type or "").strip().upper()[:64]
+    if not btype:
+        btype = "UNKNOWN"
+
+    signature, clean_filters = _filter_signature(filters)
+
+    with _filter_prefs_lock:
+        conn = _db_connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT cases_json, case_count, updated_at
+                FROM jira_match_cache
+                WHERE user_id = ? AND node_id = ? AND board_type = ? AND filter_signature = ?
+                LIMIT 1
+                """,
+                (uid, nid, btype, signature),
+            ).fetchone()
+        finally:
+            conn.close()
+
+    if not row:
+        return None
+
+    raw_cases = str(row["cases_json"] or "[]")
+    try:
+        cases = json.loads(raw_cases)
+        if not isinstance(cases, list):
+            cases = []
+    except Exception:
+        cases = []
+
+    return {
+        "userId": uid,
+        "nodeId": nid,
+        "boardType": btype,
+        "filters": clean_filters,
+        "cases": cases,
+        "caseCount": int(row["case_count"] or len(cases)),
+        "updatedAt": int(row["updated_at"] or 0),
     }
 
 def cache_get(node_id: str) -> Optional[Dict[str, Any]]:
@@ -1129,6 +1253,44 @@ async def get_latest_manual_json_upload(request: Request):
     return {
         "ok": True,
         "item": item,
+    }
+
+
+@app.get("/api/jira/match-cache")
+async def jira_get_match_cache(request: Request):
+    user_id = _normalize_user_id(request.query_params.get("userId", "default"))
+    node_id = _normalize_node_id(request.query_params.get("nodeId", FILTER_PREF_DEFAULT_NODE))
+    board_type = str(request.query_params.get("boardType") or "").strip()
+    filters = {
+        "specificDut": request.query_params.get("specificDut") or "",
+        "lightEquipment": request.query_params.get("lightEquipment") or "",
+        "testChart": request.query_params.get("testChart") or "",
+        "testScene": request.query_params.get("testScene") or "",
+    }
+
+    item = _get_jira_match_cache(user_id, node_id, board_type, filters)
+    return {
+        "ok": True,
+        "item": item,
+    }
+
+
+@app.post("/api/jira/match-cache")
+async def jira_set_match_cache(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="invalid request body")
+
+    user_id = _normalize_user_id((body or {}).get("userId", "default"))
+    node_id = _normalize_node_id((body or {}).get("nodeId", FILTER_PREF_DEFAULT_NODE))
+    board_type = str((body or {}).get("boardType") or "").strip()
+    filters = (body or {}).get("filters") or {}
+    cases = (body or {}).get("cases") or []
+
+    data = _set_jira_match_cache(user_id, node_id, board_type, filters, cases)
+    return {
+        "ok": True,
+        **data,
     }
 
 
