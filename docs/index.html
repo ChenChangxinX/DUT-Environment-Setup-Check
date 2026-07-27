@@ -992,11 +992,22 @@
                 `<option value="__ANY__" ${selected === "__ANY__" ? "selected" : ""}>Any</option>`,
                 `<option value="__EMPTY__" ${selected === "__EMPTY__" ? "selected" : ""}>(Empty)</option>`,
             ];
-            (values || []).forEach(v => {
+            const list = values || [];
+            list.forEach(v => {
                 const escV = esc(v);
                 const isSel = selected === v ? "selected" : "";
                 rows.push(`<option value="${escV}" ${isSel}>${escV}</option>`);
             });
+
+            // Keep persisted value visible even if option text has formatting differences.
+            const sel = String(selected || "").trim();
+            if (sel && sel !== "__ANY__" && sel !== "__EMPTY__") {
+                const hasExact = list.some(v => String(v || "").trim() === sel);
+                if (!hasExact) {
+                    const escSel = esc(sel);
+                    rows.push(`<option value="${escSel}" selected>${escSel}</option>`);
+                }
+            }
             return rows.join("");
         }
 
