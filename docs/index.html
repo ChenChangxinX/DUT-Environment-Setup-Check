@@ -681,7 +681,7 @@
         let nodeList = [];
         let selectedNodeId = null;
         let selectedTriggerType = null;
-        let manualJsonTableState = { rows: null, fileName: "" };
+        let manualJsonTableState = { rows: null, fileName: "", matches: {} };
         let jiraCasesSynced = false;
         let jiraSyncMeta = {};
         const DEFAULT_FIXED_JIRA_CASE_OPTIONS = {
@@ -1624,16 +1624,115 @@
             return Array.from(new Set(sensors)).join(" ");
         }
 
+        function _splitManualAobSensors(aobText) {
+            const txt = String(aobText || "").toUpperCase();
+            const sensors = [];
+            if (txt.includes("OV13B10") || txt.includes("OV13B")) sensors.push("OV13B10");
+            if (txt.includes("OG0VA1B")) sensors.push("OG0VA1B");
+            if (txt.includes("OV08X40")) sensors.push("OV08X40");
+            if (txt.includes("IMX688")) sensors.push("IMX688");
+            return Array.from(new Set(sensors));
+        }
+
+        function _extractBoardHintsFromText(text) {
+            const t = String(text || "").toUpperCase();
+            const hints = new Set();
+            if (t.includes("DC1")) hints.add("CVS");
+            if (t.includes("CVS")) hints.add("CVS");
+            if (t.includes("GC")) hints.add("GC");
+            if (t.includes("DC2")) hints.add("DC2");
+            if (t.includes("S688") || t.includes("SINGE 688")) hints.add("S688");
+            return hints;
+        }
+
+        function _matchManualRowDuts(rowMeta) {
+            const rvpText = String(rowMeta?.rvpType || "");
+            const referenceText = String(rowMeta?.referenceCasesItems || "");
+            const envRvp = String(rowMeta?.envRvpType || "").trim().toUpperCase();
+            const aobSensors = _splitManualAobSensors(rowMeta?.aob || "");
+
+            const boardHints = new Set([
+                ..._extractBoardHintsFromText(rvpText),
+                ..._extractBoardHintsFromText(referenceText),
+            ]);
+
+            if (boardHints.has("DC2") && aobSensors.length === 1 && aobSensors[0] === "IMX688") {
+                boardHints.delete("DC2");
+                boardHints.add("S688");
+            }
+
+            const matches = nodeList.filter(n => {
+                const nodeId = String(n?.id || "").toUpperCase();
+                const category = String(n?.category || "").toUpperCase();
+                const deviceName = String(n?.device_name || "").toUpperCase();
+
+                const isCVS = category.includes("CVS") || nodeId.startsWith("CVS-");
+                const isGC = category.includes("GC") || nodeId.startsWith("GC-");
+                const isDC2 = category === "DC" || nodeId.startsWith("DC-");
+                const isS688 = category.includes("SINGE 688") || deviceName.includes("S688") || nodeId.startsWith("SINGE 688");
+
+                let boardOk = true;
+                if (boardHints.size > 0) {
+                    boardOk = false;
+                    if (boardHints.has("CVS") && isCVS) boardOk = true;
+                    if (boardHints.has("GC") && isGC) boardOk = true;
+                    if (boardHints.has("DC2") && isDC2) boardOk = true;
+                    if (boardHints.has("S688") && isS688) boardOk = true;
+                }
+                if (!boardOk) return false;
+
+                if (envRvp) {
+                    const nodeRvp = String(n?.rvp_type || "").trim().toUpperCase();
+                    return nodeRvp === envRvp;
+                }
+                return true;
+            });
+
+            return {
+                hint: Array.from(boardHints).join(", ") || "(none)",
+                envRvp: envRvp || "(none)",
+                ids: matches.map(n => n.id),
+            };
+        }
+
+        function matchManualJsonRow(rowIndex) {
+            const idx = Number(rowIndex);
+            if (!Number.isInteger(idx) || idx < 0) return;
+            const rows = manualJsonTableState?.rows || [];
+            const row = rows[idx];
+            if (!row) return;
+
+            const envMeta = _extractTestEnvironmentMeta(row);
+            const rowMeta = {
+                rvpType: _deriveManualBoardType(row, envMeta),
+                aob: _extractManualAobSensors(row, envMeta),
+                referenceCasesItems: _pickJsonFieldValue(row, ["reference_cases_items", "reference cases items", "referenceCasesItems"]),
+                envRvpType: envMeta?.rvpType || "",
+            };
+
+            const result = _matchManualRowDuts(rowMeta);
+            manualJsonTableState.matches = manualJsonTableState.matches || {};
+            manualJsonTableState.matches[idx] = result;
+            _renderManualJsonTable(manualJsonTableState.rows || [], manualJsonTableState.fileName || "");
+            setGlobal(`Row ${idx + 1} matched DUT: ${result.ids.join(", ") || "none"}`);
+        }
+
         function _renderManualJsonTable(rows, fileName) {
             const content = document.getElementById("triggerContent");
             if (!content) return;
-            manualJsonTableState = { rows: rows || [], fileName: fileName || "" };
+            const normalizedRows = rows || [];
+            const normalizedFileName = fileName || "";
+            const shouldResetMatches = !manualJsonTableState.rows
+                || manualJsonTableState.fileName !== normalizedFileName
+                || manualJsonTableState.rows !== normalizedRows;
+            const nextMatches = shouldResetMatches ? {} : (manualJsonTableState.matches || {});
+            manualJsonTableState = { rows: normalizedRows, fileName: normalizedFileName, matches: nextMatches };
             if (!rows || rows.length === 0) {
                 content.innerHTML = `<div style="padding:1rem;color:#7f8c8d;">文件 ${esc(fileName || "-")} 未找到可展示的记录。</div>`;
                 return;
             }
 
-            const tableRows = rows.map(r => {
+            const tableRows = rows.map((r, idx) => {
                 const hsdId = _pickJsonFieldValue(r, ["id", "hsd id", "hsd_id", "hsdId"]);
                 const updatedDate = _pickJsonFieldValue(r, ["updated_date", "updated date", "updatedDate"]);
                 const submittedBy = _pickJsonFieldValue(r, ["submitted_by", "submitted by", "submittedBy"]);
@@ -1642,6 +1741,10 @@
                 const rvpType = _deriveManualBoardType(r, envMeta);
                 const aob = _extractManualAobSensors(r, envMeta);
                 const referenceCasesItems = _pickJsonFieldValue(r, ["reference_cases_items", "reference cases items", "referenceCasesItems"]);
+                const matched = manualJsonTableState.matches?.[idx];
+                const matchText = matched
+                    ? (matched.ids.length > 0 ? matched.ids.join(", ") : "未匹配到 DUT")
+                    : "-";
                 return `
                     <tr>
                         <td>${esc(hsdId)}</td>
@@ -1651,6 +1754,10 @@
                         <td>${esc(rvpType)}</td>
                         <td>${esc(aob)}</td>
                         <td>${esc(referenceCasesItems)}</td>
+                        <td>
+                            <button class="btn btn-primary" style="padding:0.2rem 0.5rem; font-size:0.75rem;" onclick="matchManualJsonRow(${idx})">匹配</button>
+                            <div style="margin-top:0.25rem; color:#2c3e50; font-size:0.75rem; line-height:1.3;">${esc(matchText)}</div>
+                        </td>
                     </tr>
                 `;
             }).join("");
@@ -1670,6 +1777,7 @@
                                 <th>RVP type</th>
                                 <th>AOB</th>
                                 <th>reference_cases_items</th>
+                                <th>操作</th>
                             </tr>
                         </thead>
                         <tbody>${tableRows}</tbody>
