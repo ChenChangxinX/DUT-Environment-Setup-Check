@@ -59,6 +59,7 @@ FIXED_FILTER_SECTION_MAP = {
 }
 
 FILTER_PREF_KEYS = ("specificDut", "lightEquipment", "testChart", "testScene")
+FILTER_PREF_DEFAULT_NODE = "__GLOBAL__"
 
 # ----------------------------
 # In-memory cache (replaces Redis)
@@ -108,15 +109,48 @@ def _init_filter_prefs_db() -> None:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS jira_filter_preferences (
-                    user_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
                     specific_dut TEXT NOT NULL DEFAULT '__ANY__',
                     light_equipment TEXT NOT NULL DEFAULT '__ANY__',
                     test_chart TEXT NOT NULL DEFAULT '__ANY__',
                     test_scene TEXT NOT NULL DEFAULT '__ANY__',
-                    updated_at INTEGER NOT NULL
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (user_id, node_id)
                 )
                 """
             )
+
+            cols = [str(r["name"] or "") for r in conn.execute("PRAGMA table_info(jira_filter_preferences)").fetchall()]
+            if "node_id" not in cols:
+                conn.execute("DROP TABLE IF EXISTS jira_filter_preferences_v2")
+                conn.execute(
+                    """
+                    CREATE TABLE jira_filter_preferences_v2 (
+                        user_id TEXT NOT NULL,
+                        node_id TEXT NOT NULL,
+                        specific_dut TEXT NOT NULL DEFAULT '__ANY__',
+                        light_equipment TEXT NOT NULL DEFAULT '__ANY__',
+                        test_chart TEXT NOT NULL DEFAULT '__ANY__',
+                        test_scene TEXT NOT NULL DEFAULT '__ANY__',
+                        updated_at INTEGER NOT NULL,
+                        PRIMARY KEY (user_id, node_id)
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO jira_filter_preferences_v2 (
+                        user_id, node_id, specific_dut, light_equipment, test_chart, test_scene, updated_at
+                    )
+                    SELECT user_id, ?, specific_dut, light_equipment, test_chart, test_scene, updated_at
+                    FROM jira_filter_preferences
+                    """,
+                    (FILTER_PREF_DEFAULT_NODE,),
+                )
+                conn.execute("DROP TABLE jira_filter_preferences")
+                conn.execute("ALTER TABLE jira_filter_preferences_v2 RENAME TO jira_filter_preferences")
+
             conn.commit()
         finally:
             conn.close()
@@ -127,6 +161,13 @@ def _normalize_user_id(value: Any) -> str:
     if not user_id:
         return "default"
     return user_id[:128]
+
+
+def _normalize_node_id(value: Any) -> str:
+    node_id = str(value or "").strip()
+    if not node_id:
+        return FILTER_PREF_DEFAULT_NODE
+    return node_id[:128]
 
 
 def _normalize_filter_value(value: Any) -> str:
@@ -145,8 +186,9 @@ def _default_filter_preferences() -> Dict[str, str]:
     return {k: "__ANY__" for k in FILTER_PREF_KEYS}
 
 
-def _get_filter_preferences(user_id: str) -> Dict[str, Any]:
+def _get_filter_preferences(user_id: str, node_id: str) -> Dict[str, Any]:
     uid = _normalize_user_id(user_id)
+    nid = _normalize_node_id(node_id)
     with _filter_prefs_lock:
         conn = _db_connect()
         try:
@@ -154,9 +196,9 @@ def _get_filter_preferences(user_id: str) -> Dict[str, Any]:
                 """
                 SELECT specific_dut, light_equipment, test_chart, test_scene, updated_at
                 FROM jira_filter_preferences
-                WHERE user_id = ?
+                WHERE user_id = ? AND node_id = ?
                 """,
-                (uid,),
+                (uid, nid),
             ).fetchone()
         finally:
             conn.close()
@@ -164,12 +206,14 @@ def _get_filter_preferences(user_id: str) -> Dict[str, Any]:
     if not row:
         return {
             "userId": uid,
+            "nodeId": nid,
             "filters": _default_filter_preferences(),
             "updatedAt": 0,
         }
 
     return {
         "userId": uid,
+        "nodeId": nid,
         "filters": {
             "specificDut": str(row["specific_dut"] or "__ANY__"),
             "lightEquipment": str(row["light_equipment"] or "__ANY__"),
@@ -180,8 +224,9 @@ def _get_filter_preferences(user_id: str) -> Dict[str, Any]:
     }
 
 
-def _set_filter_preferences(user_id: str, filters: Any) -> Dict[str, Any]:
+def _set_filter_preferences(user_id: str, node_id: str, filters: Any) -> Dict[str, Any]:
     uid = _normalize_user_id(user_id)
+    nid = _normalize_node_id(node_id)
     clean_filters = _normalize_filter_payload(filters)
     updated_at = int(time.time())
 
@@ -196,7 +241,7 @@ def _set_filter_preferences(user_id: str, filters: Any) -> Dict[str, Any]:
                     test_chart = ?,
                     test_scene = ?,
                     updated_at = ?
-                WHERE user_id = ?
+                WHERE user_id = ? AND node_id = ?
                 """,
                 (
                     clean_filters["specificDut"],
@@ -205,6 +250,7 @@ def _set_filter_preferences(user_id: str, filters: Any) -> Dict[str, Any]:
                     clean_filters["testScene"],
                     updated_at,
                     uid,
+                    nid,
                 ),
             )
 
@@ -212,11 +258,12 @@ def _set_filter_preferences(user_id: str, filters: Any) -> Dict[str, Any]:
                 conn.execute(
                     """
                     INSERT INTO jira_filter_preferences (
-                        user_id, specific_dut, light_equipment, test_chart, test_scene, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        user_id, node_id, specific_dut, light_equipment, test_chart, test_scene, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         uid,
+                        nid,
                         clean_filters["specificDut"],
                         clean_filters["lightEquipment"],
                         clean_filters["testChart"],
@@ -230,6 +277,7 @@ def _set_filter_preferences(user_id: str, filters: Any) -> Dict[str, Any]:
 
     return {
         "userId": uid,
+        "nodeId": nid,
         "filters": clean_filters,
         "updatedAt": updated_at,
     }
@@ -916,10 +964,12 @@ async def jira_get_fixed_filter_options():
 @app.get("/api/jira/filter-preferences")
 async def jira_get_filter_preferences(request: Request):
     user_id = _normalize_user_id(request.query_params.get("userId", "default"))
-    data = _get_filter_preferences(user_id)
+    node_id = _normalize_node_id(request.query_params.get("nodeId", FILTER_PREF_DEFAULT_NODE))
+    data = _get_filter_preferences(user_id, node_id)
     return {
         "ok": True,
         "userId": data["userId"],
+        "nodeId": data["nodeId"],
         "filters": data["filters"],
         "updatedAt": data["updatedAt"],
     }
@@ -929,11 +979,13 @@ async def jira_get_filter_preferences(request: Request):
 async def jira_put_filter_preferences(request: Request):
     body = await request.json()
     user_id = _normalize_user_id((body or {}).get("userId"))
+    node_id = _normalize_node_id((body or {}).get("nodeId"))
     filters = (body or {}).get("filters")
-    data = _set_filter_preferences(user_id, filters)
+    data = _set_filter_preferences(user_id, node_id, filters)
     return {
         "ok": True,
         "userId": data["userId"],
+        "nodeId": data["nodeId"],
         "filters": data["filters"],
         "updatedAt": data["updatedAt"],
         "strategy": "last_write_wins",

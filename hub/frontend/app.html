@@ -741,6 +741,7 @@
             testScene: [],
         };
         let fixedJiraCaseOptions = { ...DEFAULT_FIXED_JIRA_CASE_OPTIONS };
+        const DEFAULT_FILTER_NODE_ID = "__GLOBAL__";
         const JIRA_FILTERS_STORAGE_KEY_PREFIX = "hub_jira_global_filters::";
         const globalJiraFilters = {
             specificDut: "__ANY__",
@@ -852,17 +853,28 @@
             return await r.json();
         }
 
-        async function getJiraFilterPreferences(userId) {
-            const r = await fetch(apiUrl(`/api/jira/filter-preferences?userId=${encodeURIComponent(userId || "default")}`));
+        function _normalizeFilterNodeId(nodeId) {
+            return (String(nodeId || "").trim() || DEFAULT_FILTER_NODE_ID);
+        }
+
+        function _resetGlobalJiraFilters() {
+            globalJiraFilters.specificDut = "__ANY__";
+            globalJiraFilters.lightEquipment = "__ANY__";
+            globalJiraFilters.testChart = "__ANY__";
+            globalJiraFilters.testScene = "__ANY__";
+        }
+
+        async function getJiraFilterPreferences(userId, nodeId) {
+            const r = await fetch(apiUrl(`/api/jira/filter-preferences?userId=${encodeURIComponent(userId || "default")}&nodeId=${encodeURIComponent(_normalizeFilterNodeId(nodeId))}`));
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             return await r.json();
         }
 
-        async function putJiraFilterPreferences(userId, filters) {
+        async function putJiraFilterPreferences(userId, nodeId, filters) {
             const r = await fetch(apiUrl("/api/jira/filter-preferences"), {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId, filters }),
+                body: JSON.stringify({ userId, nodeId: _normalizeFilterNodeId(nodeId), filters }),
             });
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             return await r.json();
@@ -896,25 +908,25 @@
 
         function updateGlobalJiraFilter(key, value) {
             globalJiraFilters[key] = value;
-            saveJiraFiltersToLocal();
-            void saveJiraFiltersToServer();
+            saveJiraFiltersToLocal(selectedNodeId);
+            void saveJiraFiltersToServer(selectedNodeId);
         }
 
-        function _filterStorageKey() {
-            return `${JIRA_FILTERS_STORAGE_KEY_PREFIX}${currentUserId || "default"}`;
+        function _filterStorageKey(nodeId) {
+            return `${JIRA_FILTERS_STORAGE_KEY_PREFIX}${currentUserId || "default"}::${_normalizeFilterNodeId(nodeId)}`;
         }
 
-        function saveJiraFiltersToLocal() {
+        function saveJiraFiltersToLocal(nodeId) {
             try {
-                localStorage.setItem(_filterStorageKey(), JSON.stringify(globalJiraFilters));
+                localStorage.setItem(_filterStorageKey(nodeId), JSON.stringify(globalJiraFilters));
             } catch (e) {
                 console.log("Save Jira filters failed: " + e.message);
             }
         }
 
-        function loadJiraFiltersFromLocal() {
+        function loadJiraFiltersFromLocal(nodeId) {
             try {
-                const raw = localStorage.getItem(_filterStorageKey());
+                const raw = localStorage.getItem(_filterStorageKey(nodeId));
                 if (!raw) return;
                 const parsed = JSON.parse(raw);
                 ["specificDut", "lightEquipment", "testChart", "testScene"].forEach(k => {
@@ -928,10 +940,11 @@
             }
         }
 
-        async function loadJiraFilters() {
-            loadJiraFiltersFromLocal();
+        async function loadJiraFilters(nodeId) {
+            _resetGlobalJiraFilters();
+            loadJiraFiltersFromLocal(nodeId);
             try {
-                const payload = await getJiraFilterPreferences(currentUserId);
+                const payload = await getJiraFilterPreferences(currentUserId, nodeId);
                 const remote = payload?.filters || {};
                 ["specificDut", "lightEquipment", "testChart", "testScene"].forEach(k => {
                     const v = remote?.[k];
@@ -939,15 +952,15 @@
                         globalJiraFilters[k] = v;
                     }
                 });
-                saveJiraFiltersToLocal();
+                saveJiraFiltersToLocal(nodeId);
             } catch (e) {
                 console.log("Load Jira filters from server failed: " + e.message);
             }
         }
 
-        async function saveJiraFiltersToServer() {
+        async function saveJiraFiltersToServer(nodeId) {
             try {
-                await putJiraFilterPreferences(currentUserId, globalJiraFilters);
+                await putJiraFilterPreferences(currentUserId, nodeId, globalJiraFilters);
             } catch (e) {
                 console.log("Save Jira filters to server failed: " + e.message);
             }
@@ -1376,6 +1389,7 @@
         async function selectNode(nodeId) {
             selectedTriggerType = null;
             selectedNodeId = nodeId;
+            await loadJiraFilters(selectedNodeId);
             renderGlobalJiraPanel();
             setGlobal(`Loading ${nodeId}...`);
 
@@ -2026,7 +2040,7 @@
             const userIdInput = document.getElementById("userIdInput");
             const saveUserIdBtn = document.getElementById("saveUserIdBtn");
 
-            await loadJiraFilters();
+            await loadJiraFilters(selectedNodeId);
 
             input.value = apiBase;
             userIdInput.value = currentUserId;
